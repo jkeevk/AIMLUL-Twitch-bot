@@ -7,6 +7,7 @@ def load_settings(config_path: str = "settings.ini") -> Dict[str, Any]:
     """Загружает настройки бота из INI-файла"""
     config = configparser.ConfigParser()
 
+    # Создаем конфиг по умолчанию, если файл не существует
     if not os.path.exists(config_path):
         config["SETTINGS"] = {
             "command_delay_time": "30",
@@ -17,7 +18,7 @@ def load_settings(config_path: str = "settings.ini") -> Dict[str, Any]:
             "dsn": "postgresql+asyncpg://bot:botpassword@db/twitch_bot"
         }
         config["ADMINS"] = {"admins": ""}
-
+        config["ADMINS"] = {"privileged": ""}
         with open(config_path, "w") as configfile:
             config.write(configfile)
 
@@ -43,6 +44,11 @@ def load_settings(config_path: str = "settings.ini") -> Dict[str, Any]:
             for admin in config.get("ADMINS", "admins", fallback="").split(",")
             if admin.strip()
         ],
+        "privileged": {
+            privileged.strip().lower()
+            for privileged in config.get("ADMINS", "privileged", fallback="").split(",")
+            if privileged.strip()
+        },
     }
 
     return settings

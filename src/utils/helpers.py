@@ -1,7 +1,8 @@
 from twitchio import Chatter
 
-PRIVILEGED_USERS = {}
+from src.core.config_loader import load_settings
 
+PRIVILEGED_USERS = load_settings()["privileged"]
 
 def is_privileged(chatter: Chatter) -> bool:
     return (chatter.is_mod or chatter.is_broadcaster) or chatter.name in PRIVILEGED_USERS
@@ -56,14 +57,17 @@ def format_duration(seconds: int) -> str:
     """Форматирует длительность в человекочитаемый вид с правильным склонением (винительный падеж)"""
     parts = []
 
+    # Обрабатываем часы
     hours, seconds = divmod(seconds, 3600)
     if hours:
         parts.append(f"{hours} {pluralize(hours, 'час', case='accusative')}")
 
+    # Обрабатываем минуты
     minutes, seconds = divmod(seconds, 60)
     if minutes:
         parts.append(f"{minutes} {pluralize(minutes, 'минута', case='accusative')}")
 
+    # Обрабатываем секунды
     if seconds or not parts:
         parts.append(f"{seconds} {pluralize(seconds, 'секунда', case='accusative')}")
 
