@@ -1,5 +1,6 @@
 import logging
 from contextlib import asynccontextmanager
+from typing import List, Optional, Tuple
 from sqlalchemy import select, desc, func
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
@@ -9,42 +10,71 @@ logger = logging.getLogger(__name__)
 
 
 class Database:
-    def __init__(self, dsn: str):
+    """Database management class for handling player statistics."""
+
+    def __init__(self, dsn: str) -> None:
+        """
+        Initialize database connection.
+
+        Args:
+            dsn: Database connection string
+        """
         self.engine = create_async_engine(dsn, echo=False, future=True)
         self.async_session = async_sessionmaker(
             self.engine, expire_on_commit=False, class_=AsyncSession
         )
-        logger.info("✅ Database engine initialized")
+        logger.info("Database engine initialized")
 
-    async def connect(self):
-        """Подключается к базе и создает таблицы, если их нет"""
+    async def connect(self) -> None:
+        """Connect to database and create tables if they don't exist."""
         try:
             async with self.engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
-            logger.info("🔄 Database tables created/verified")
+            logger.info("Database tables created/verified")
         except SQLAlchemyError as e:
-            logger.error(f"🚨 Database connection error: {e}")
+            logger.error(f"Database connection error: {e}")
             raise
 
-    async def close(self):
+    async def close(self) -> None:
+        """Close database connection."""
         try:
             await self.engine.dispose()
-            logger.info("🔌 Database connection closed")
+            logger.info("Database connection closed")
         except SQLAlchemyError as e:
-            logger.error(f"🚨 Error closing database: {e}")
+            logger.error(f"Error closing database: {e}")
 
     @asynccontextmanager
-    async def session_scope(self):
+    async def session_scope(self) -> AsyncSession:
+        """
+        Provide a transactional scope around a series of operations.
+
+        Yields:
+            AsyncSession: Database session object
+
+        Raises:
+            SQLAlchemyError: If database operation fails
+        """
         async with self.async_session() as session:
             try:
                 yield session
                 await session.commit()
             except SQLAlchemyError as e:
                 await session.rollback()
-                logger.error(f"🚨 Database error: {e}")
+                logger.error(f"Database transaction error: {e}")
                 raise
 
-    async def update_stats(self, twitch_id: str, username: str, win: bool):
+    async def update_stats(self, twitch_id: str, username: str, win: bool) -> Tuple[int, int]:
+        """
+        Update player statistics with win/loss.
+
+        Args:
+            twitch_id: Player's Twitch ID
+            username: Player's username
+            win: True if player won, False if lost
+
+        Returns:
+            Tuple of (wins, losses) count for the player
+        """
         try:
             async with self.session_scope() as session:
                 result = await session.execute(
@@ -58,7 +88,7 @@ class Database:
                     else:
                         player.losses += 1
                     logger.info(
-                        f"📝 Обновлена статистика для {username}: +{'победа' if win else 'поражение'}"
+                        f"Updated stats for {username}: {'win' if win else 'loss'}"
                     )
                 else:
                     player = PlayerStats(
@@ -68,16 +98,25 @@ class Database:
                         losses=0 if win else 1,
                     )
                     session.add(player)
-                    logger.info(f"🆕 Создана запись для {username}")
+                    logger.info(f"Created new record for {username}")
 
                 await session.flush()
                 return player.wins, player.losses
 
         except SQLAlchemyError as e:
-            logger.error(f"🚨 Update stats error: {e}", exc_info=True)
+            logger.error(f"Update stats error: {e}", exc_info=True)
             return 0, 0
 
-    async def get_stats(self, twitch_id: str):
+    async def get_stats(self, twitch_id: str) -> Tuple[int, int]:
+        """
+        Retrieve player statistics.
+
+        Args:
+            twitch_id: Player's Twitch ID
+
+        Returns:
+            Tuple of (wins, losses) for the player
+        """
         try:
             async with self.session_scope() as session:
                 result = await session.execute(
@@ -90,11 +129,19 @@ class Database:
                 return 0, 0
 
         except SQLAlchemyError as e:
-            logger.error(f"🚨 Get stats error: {e}")
+            logger.error(f"Get stats error: {e}")
             return 0, 0
 
-    async def get_top_players(self, limit: int = 3):
-        """Возвращает топ игроков по количеству побед"""
+    async def get_top_players(self, limit: int = 3) -> List[Tuple[str, int, int]]:
+        """
+        Retrieve top players by win count.
+
+        Args:
+            limit: Number of top players to return
+
+        Returns:
+            List of tuples containing (username, wins, losses) for each player
+        """
         try:
             async with self.session_scope() as session:
                 stmt = select(PlayerStats).order_by(desc(PlayerStats.wins)).limit(limit)
@@ -107,11 +154,19 @@ class Database:
                 ]
 
         except SQLAlchemyError as e:
-            logger.error(f"🚨 Get top players error: {e}")
+            logger.error(f"Get top players error: {e}")
             return []
 
-    async def get_player_rank(self, twitch_id: str):
-        """Возвращает позицию игрока в общем рейтинге"""
+    async def get_player_rank(self, twitch_id: str) -> Optional[int]:
+        """
+        Get player's rank position based on wins.
+
+        Args:
+            twitch_id: Player's Twitch ID
+
+        Returns:
+            Player's rank position or None if not found
+        """
         try:
             async with self.session_scope() as session:
                 subquery = (
@@ -133,5 +188,5 @@ class Database:
                 return rank if rank else None
 
         except SQLAlchemyError as e:
-            logger.error(f"🚨 Get player rank error: {e}")
+            logger.error(f"Get player rank error: {e}")
             return None

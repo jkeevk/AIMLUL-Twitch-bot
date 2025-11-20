@@ -5,6 +5,7 @@ import threading
 import urllib.parse as urlparse
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from typing import Optional, Dict, Any
 
 import requests
 
@@ -13,12 +14,24 @@ CONFIG_PATH = os.path.join(BASE_DIR, "settings.ini")
 
 
 class CallbackHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
+    """
+    HTTP request handler for OAuth callback processing.
+
+    Handles the redirect from Twitch OAuth authorization and extracts
+    the authorization code or error from the callback URL.
+    """
+
+    def do_GET(self) -> None:
+        """
+        Process GET request from OAuth callback.
+
+        Extracts authorization code from URL parameters and triggers
+        server shutdown after processing the callback.
+        """
         self.send_response(200)
         self.send_header("Content-type", "text/html")
         self.end_headers()
 
-        # Парсим параметры из URL
         query = urlparse.urlparse(self.path).query
         params = urlparse.parse_qs(query)
 
@@ -43,8 +56,21 @@ class CallbackHandler(BaseHTTPRequestHandler):
 
         threading.Thread(target=self.server.shutdown, daemon=True).start()
 
+    def log_message(self, format: str, *args: Any) -> None:
+        """Suppress default HTTP server log messages."""
+        pass
 
-def save_tokens(access_token, refresh_token, client_id, client_secret):
+
+def save_tokens(access_token: str, refresh_token: str, client_id: str, client_secret: str) -> None:
+    """
+    Save OAuth tokens and client credentials to configuration file.
+
+    Args:
+        access_token: OAuth access token
+        refresh_token: OAuth refresh token
+        client_id: Twitch application client ID
+        client_secret: Twitch application client secret
+    """
     config = configparser.ConfigParser()
     config.read(CONFIG_PATH)
 
@@ -59,17 +85,23 @@ def save_tokens(access_token, refresh_token, client_id, client_secret):
     with open(CONFIG_PATH, "w") as configfile:
         config.write(configfile)
 
-    print(f"✅ Токены сохранены в {CONFIG_PATH}")
+    print(f"Tokens saved to {CONFIG_PATH}")
 
 
-def get_oauth_token():
+def get_oauth_token() -> Optional[Dict[str, Any]]:
+    """
+    Perform OAuth token acquisition flow.
+
+    Returns:
+        Token data dictionary if successful, None otherwise
+    """
     config = configparser.ConfigParser()
     config.read(CONFIG_PATH)
 
     if not config.has_option("TOKEN", "client_id") or not config.has_option(
-        "TOKEN", "client_secret"
+            "TOKEN", "client_secret"
     ):
-        print("❌ Ошибка: client_id и client_secret должны быть указаны в settings.ini")
+        print("Error: client_id and client_secret must be specified in settings.ini")
         return None
 
     client_id = config.get("TOKEN", "client_id")
@@ -89,18 +121,18 @@ def get_oauth_token():
         "&force_verify=true"
     )
 
-    print("Открываю браузер для авторизации...")
+    print("Opening browser for authorization...")
     webbrowser.open(auth_url)
 
-    print("Ожидаю callback на http://localhost:3000...")
-    print("После авторизации в Twitch, токен будет сохранен автоматически")
+    print("Waiting for callback on http://localhost:3000...")
+    print("After Twitch authorization, token will be saved automatically")
     server.serve_forever()
 
     if not server.auth_code:
-        print("❌ Не удалось получить код авторизации")
+        print("Failed to receive authorization code")
         return None
 
-    print(f"\n✅ Получен код авторизации")
+    print("Authorization code received successfully")
 
     token_url = "https://id.twitch.tv/oauth2/token"
     data = {
@@ -111,12 +143,12 @@ def get_oauth_token():
         "redirect_uri": redirect_uri,
     }
 
-    print("\n🔄 Обмениваю код на токен...")
+    print("Exchanging authorization code for token...")
     response = requests.post(token_url, data=data)
 
     if response.status_code == 200:
         token_data = response.json()
-        print("\n✅ Успешно получен токен!")
+        print("Token acquired successfully")
 
         save_tokens(
             access_token=token_data["access_token"],
@@ -127,44 +159,54 @@ def get_oauth_token():
 
         return token_data
     else:
-        print(f"\n❌ Ошибка при получении токена: {response.status_code}")
+        print(f"Error acquiring token: {response.status_code}")
         print(response.text)
         return None
 
 
-if __name__ == "__main__":
+def _create_default_config() -> None:
+    """Create default configuration file with required sections."""
+    config = configparser.ConfigParser()
+    config["TOKEN"] = {
+        "token": "",
+        "client_id": "",
+        "client_secret": "",
+        "refresh_token": "",
+    }
+    config["INITIAL_CHANNELS"] = {"channels": ""}
+    config["SETTINGS"] = {
+        "command_delay_time": "45",
+        "refresh_token_delay_time": "7200"
+    }
+
+    with open(CONFIG_PATH, "w") as configfile:
+        config.write(configfile)
+
+    print(f"Default configuration created: {CONFIG_PATH}")
+
+
+def main() -> None:
+    """Main entry point for token generator script."""
     print("\n" + "=" * 50)
     print(" Twitch Token Generator".center(50))
     print("=" * 50 + "\n")
 
     if not os.path.exists(CONFIG_PATH):
-        print(f"⚠️ Файл настроек не найден: {CONFIG_PATH}")
-        print("Создаю базовый файл настроек...")
+        print(f"Configuration file not found: {CONFIG_PATH}")
+        print("Creating default configuration file...")
 
-        config = configparser.ConfigParser()
-        config["TOKEN"] = {
-            "token": "",
-            "client_id": "",
-            "client_secret": "",
-            "refresh_token": "",
-        }
-        config["INITIAL_CHANNELS"] = {"channels": ""}
-        config["SETTINGS"] = {"command_delay_time": "30"}
-        config["SETTINGS"] = {"refresh_token_delay_time": "14400"}
-
-        with open(CONFIG_PATH, "w") as configfile:
-            config.write(configfile)
-
-        print(f"✅ Файл настроек создан: {CONFIG_PATH}")
-        print(
-            "Пожалуйста, добавьте client_id и client_secret из Twitch Developer Console"
-        )
-        print("Затем запустите скрипт снова")
+        _create_default_config()
+        print("Please add client_id and client_secret from Twitch Developer Console")
+        print("Then run the script again")
         sys.exit(0)
 
     token_data = get_oauth_token()
 
     if token_data:
-        print("\n🎉 Готово! Теперь вы можете запустить бота с новыми токенами")
+        print("\nSetup complete! You can now run the bot with new tokens")
     else:
-        print("\n❌ Не удалось получить токен. Проверьте настройки и попробуйте снова")
+        print("\nFailed to acquire token. Check settings and try again")
+
+
+if __name__ == "__main__":
+    main()

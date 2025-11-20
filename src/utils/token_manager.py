@@ -1,17 +1,25 @@
+import aiohttp
 import configparser
-import os
-import requests
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
 logger = logging.getLogger(__name__)
 
 
 class TokenManager:
+    """
+    Manager for Twitch OAuth token operations.
+
+    Handles token validation, refresh, and persistence for Twitch API authentication.
+    """
+
     def __init__(self, config_path: str):
+        """
+        Initialize TokenManager with configuration.
+
+        Args:
+            config_path: Path to configuration file containing token data
+        """
         self.config_path = config_path
         self.config = configparser.ConfigParser()
         self.config.read(config_path)
@@ -24,35 +32,50 @@ class TokenManager:
 
     @property
     def token(self) -> Optional[str]:
+        """Get current access token."""
         return self._token
 
-    def _save_config(self):
-        """Сохраняет текущую конфигурацию в файл."""
-        with open(self.config_path, "w") as configfile:
-            self.config.write(configfile)
+    def _save(self) -> None:
+        """Save current token state to configuration file."""
+        with open(self.config_path, "w") as f:
+            self.config.write(f)
 
     async def validate_token(self, token: str) -> bool:
-        """Проверяет валидность токена."""
+        """
+        Validate token with Twitch OAuth validation endpoint.
+
+        Args:
+            token: Access token to validate
+
+        Returns:
+            True if token is valid, False otherwise
+        """
         url = "https://id.twitch.tv/oauth2/validate"
         headers = {"Authorization": f"OAuth {token}"}
 
         try:
-            response = requests.get(url, headers=headers)
-            response.raise_for_status()
-            data = response.json()
-            logger.info(f"✅ Токен валиден. Scopes: {data.get('scopes', [])}")
-            return True
-        except requests.RequestException as e:
-            logger.error(f"🚨 Ошибка при валидации токена: {e}")
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        logger.info(f"Token valid. Scopes: {data.get('scopes', [])}")
+                        return True
+                    return False
+        except Exception as e:
+            logger.error(f"Token validation error: {e}")
             return False
 
     async def refresh_access_token(self) -> str:
-        """Обновляет access token с помощью refresh token и возвращает его."""
-        logger.info("🔄 Начинаю обновление токена...")
-        logger.info(
-            f"ℹ️ Использую refresh_token: {self.refresh_token[:5]}...{self.refresh_token[-5:]}"
-        )
-        logger.info(f"ℹ️ client_id: {self.client_id}")
+        """
+        Refresh access token using refresh token.
+
+        Returns:
+            New access token string
+
+        Raises:
+            RuntimeError: If token refresh fails
+        """
+        logger.info("Refreshing access token...")
 
         url = "https://id.twitch.tv/oauth2/token"
         params = {
@@ -62,41 +85,42 @@ class TokenManager:
             "client_secret": self.client_secret,
         }
 
-        logger.info("🌐 Отправляю запрос на обновление токена...")
-        response = requests.post(url, params=params)
-        if response.status_code == 200:
-            data = response.json()
-            new_token = data["access_token"]
-            new_refresh_token = data.get("refresh_token", self.refresh_token)
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, params=params) as response:
+                    data = await response.json()
 
-            self.config.set("TOKEN", "token", new_token)
-            self.config.set("TOKEN", "refresh_token", new_refresh_token)
-            self._token = new_token
-            self.refresh_token = new_refresh_token
+                    if response.status != 200:
+                        raise RuntimeError(f"Token refresh failed: {response.status} {data}")
 
-            self._save_config()
+                    new_token = data["access_token"]
+                    new_refresh = data.get("refresh_token", self.refresh_token)
 
-            logger.info("🔔 Получен ответ: 200")
-            logger.info("✅ Токен успешно обновлен!")
-            logger.info(f"💾 Конфигурация сохранена")
-            logger.info(f"🔑 Новый access_token: {new_token[:5]}...{new_token[-5:]}")
-            logger.info(
-                f"🔐 Новый refresh_token: {new_refresh_token[:5]}...{new_refresh_token[-5:]}"
-            )
+                    self._token = new_token
+                    self.refresh_token = new_refresh
 
-            # Валидация нового токена
-            if not await self.validate_token(new_token):
-                logger.error("❌ Не удалось верифицировать новый токен")
-                raise RuntimeError("Token validation failed after refresh")
+                    self.config.set("TOKEN", "token", new_token)
+                    self.config.set("TOKEN", "refresh_token", new_refresh)
+                    self._save()
 
-            return new_token
-        else:
-            logger.error(f"🚨 Ошибка при обновлении токена: {response.status_code}")
-            logger.error(f"🚨 Ответ: {response.text}")
-            raise Exception(f"Ошибка обновления токена: {response.status_code}")
+                    logger.info(f"Token refreshed successfully")
+                    return new_token
+
+        except Exception as e:
+            logger.error(f"Token refresh error: {e}")
+            raise
 
     async def get_access_token(self) -> str:
-        """Возвращает текущий токен. Если токен не установлен, вызывает обновление."""
+        """
+        Get valid access token, refreshing if necessary.
+
+        Returns:
+            Valid access token string
+        """
         if not self.token:
             return await self.refresh_access_token()
-        return self.token
+
+        if await self.validate_token(self.token):
+            return self.token
+
+        return await self.refresh_access_token()

@@ -1,39 +1,42 @@
 import asyncio
 import logging
-import os
 import sys
+import os
+from contextlib import suppress
+from typing import Dict, Any, Optional
 
 from twitchio.ext import commands
 
-from src.commands.command_handler import CommandHandler
-from src.core.config_loader import load_settings
 from src.utils.token_manager import TokenManager
-from src.db.database import Database
 from src.api.twitch_api import TwitchAPI
+from src.core.config_loader import load_settings
+from src.commands.command_handler import CommandHandler
+from src.db.database import Database
 
 CONFIG_PATH = "/app/settings.ini"
+
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler("bot.log")
-    ]
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)]
 )
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("bot")
 
 
 class TwitchBot(commands.Bot):
-    def __init__(self, token_manager: TokenManager):
-        """Инициализация бота"""
+    """Twitch bot implementation handling chat commands and automated responses."""
+
+    def __init__(self, token_manager: TokenManager) -> None:
+        """
+        Initialize the Twitch bot.
+
+        Args:
+            token_manager: Manager for handling authentication tokens
+        """
         self.config = load_settings(CONFIG_PATH)
-        self.logger = logger
         self.token_manager = token_manager
         self.active = True
-
-        if not self.token_manager.token:
-            self.logger.critical("❌ Токен отсутствует в конфигурации!")
-            raise RuntimeError("Token missing in configuration")
+        self._refresh_task_started = False
 
         super().__init__(
             token=self.token_manager.token,
@@ -44,238 +47,158 @@ class TwitchBot(commands.Bot):
         )
 
         self.api = TwitchAPI(self)
-        self.logger.info("✅ TwitchAPI инициализирован")
 
-        dsn = os.environ.get("DATABASE_URL") or self.config["database"]["dsn"]
-
-        if dsn:
-            self.db = Database(dsn)
-            self.logger.info("✅ Инициализирована база данных")
-        else:
-            self.logger.warning("❌ DSN для базы данных не указан")
-            self.db = None
-
+        dsn = os.getenv("DATABASE_URL") or self.config["database"].get("dsn")
+        self.db = Database(dsn) if dsn else None
         self.command_handler = CommandHandler(self)
-        self.token_refresh_task = None
-        self._closing = False
+        self.token_refresh_task: Optional[asyncio.Task] = None
 
-    async def update_token(self, new_token: str):
-        """Обновление токена во всех компонентах системы"""
-        self._http.token = new_token
-        self.logger.info("🆙 Токен бота успешно обновлён в HTTP-клиенте!")
+    async def update_token(self, token: str) -> None:
+        """Update authentication token and trigger WebSocket reconnection."""
+        self._http.token = token
+        await self.api.refresh_headers()
+        logger.info("Token updated successfully")
 
-        if hasattr(self, "command_handler") and hasattr(self.command_handler, "api"):
-            await self.command_handler.api.refresh_headers()
-            self.logger.info("🔄 Заголовки TwitchAPI обновлены")
+    async def periodic_refresh(self) -> None:
+        """Periodically refresh authentication token."""
+        delay = self.config["refresh_token_delay_time"]
+        logger.info("Starting scheduled token refresh")
 
-        if hasattr(self, "_connection") and self._connection:
-            self.logger.info("♻️ Переподключаю WebSocket с новым токеном...")
-            await self._connection._connect()
-            self.logger.info("✅ WebSocket переподключен")
-
-    async def event_ws_close(self):
-        """Обработчик обрыва соединения"""
-        self.logger.warning("⚠️ WebSocket разорван! Инициирую переподключение...")
-
-        if hasattr(self, "token_manager") and self.active:
+        while True:
             try:
+                await asyncio.sleep(delay)
+                logger.info("Refreshing authentication token...")
                 new_token = await self.token_manager.refresh_access_token()
                 await self.update_token(new_token)
             except Exception as e:
-                self.logger.error(f"🚨 Ошибка восстановления: {e}")
+                logger.error(f"Token refresh failed: {e}")
+                await asyncio.sleep(60)
 
-    async def event_ready(self):
-        """Обработчик готовности бота"""
-        self.logger.info(f"🔑 Logged in as | {self.nick}")
-        self.logger.info(f"🌐 Connected to: {self.connected_channels}")
-        self.logger.info(f"🆔 User ID: {self.user_id}")
-        self.logger.info("🤖 Bot is running")
+    async def event_ready(self) -> None:
+        """Handle bot ready event."""
+        logger.info(f"Bot logged in as {self.nick}")
 
         if self.db:
             try:
                 await self.db.connect()
-                self.logger.info("✅ База данных подключена")
+                logger.info("Database connection established")
             except Exception as e:
-                self.logger.error(f"❌ Ошибка подключения к БД: {e}")
+                logger.error(f"Database connection failed: {e}")
                 self.db = None
 
-        self.token_refresh_task = asyncio.create_task(self.periodic_token_refresh())
+        if not self._refresh_task_started:
+            self._refresh_task_started = True
+            self.token_refresh_task = asyncio.create_task(self.periodic_refresh())
 
-    async def event_message(self, message):
-        """Обработчик входящих сообщений"""
+    async def event_message(self, message) -> None:
+        """Handle incoming chat messages."""
         if message.echo:
             return
 
-        content_lower = message.content.lower()
-
+        text = message.content.lower()
         triggers = {
             "gnome": self.command_handler.handle_gnome,
             "applecatpanik": self.command_handler.handle_applecat,
         }
-        for trigger, handler in triggers.items():
-            if trigger in content_lower:
+
+        for word, handler in triggers.items():
+            if word in text:
                 try:
                     await handler(message)
                 except Exception as e:
-                    self.logger.error(
-                        f"🚨 Ошибка в обработке команды: {e}", exc_info=True
-                    )
+                    logger.error(f"Trigger handler error for '{word}': {e}", exc_info=True)
                 return
 
         await self.handle_commands(message)
-        self.logger.info(f"💬 {message.author.name}: {message.content}")
+        logger.info(f"{message.author.name}: {message.content}")
 
     @commands.command(name="жопа")
-    async def butt_command(self, ctx):
-        """Обработка команды !жопа со случайным эффектом"""
-        if not self.active:
-            return
-        await self.command_handler.handle_butt(ctx)
+    async def butt(self, ctx) -> None:
+        """Handle butt command."""
+        if self.active:
+            await self.command_handler.handle_butt(ctx)
 
     @commands.command(name="дрын")
-    async def club_command(self, ctx):
-        """Обработка команды !дрын с таймаутом"""
-        if not self.active:
-            return
-        await self.command_handler.handle_club(ctx)
+    async def club(self, ctx) -> None:
+        """Handle club command."""
+        if self.active:
+            await self.command_handler.handle_club(ctx)
 
-    @commands.command(name="тестовая_бочка")
-    async def test_barrel_command(self, ctx):
-        """Обработка команды !тестовая_бочка с таймаутом 10 пользователей"""
+    @commands.command(name="бочка")
+    async def test_barrel(self, ctx) -> None:
+        """Handle test barrel command (admin only)."""
         if ctx.author.name.lower() not in self.config.get("admins", []):
-            self.logger.warning(
-                f"Попытка бочки от неавторизованного пользователя: {ctx.author.name}"
-            )
+            logger.warning(f"Unauthorized test_barrel attempt by {ctx.author.name}")
             return
-        await self.command_handler.handle_test_barrel(ctx)
+        await self.command_handler.handle_barrel(ctx)
 
     @commands.command(name="очко")
-    async def twenty_one_command(self, ctx):
-        """Обработка команды !очко"""
-        if not self.active:
-            return
-        await self.command_handler.handle_twenty_one(ctx)
+    async def twentyone(self, ctx) -> None:
+        """Handle twenty-one game command."""
+        if self.active:
+            await self.command_handler.handle_twenty_one(ctx)
 
     @commands.command(name="я")
-    async def me_command(self, ctx):
-        """Обработка команды !я"""
-        if not self.active:
-            return
-        await self.command_handler.handle_me(ctx)
+    async def me(self, ctx) -> None:
+        """Handle user stats command."""
+        if self.active:
+            await self.command_handler.handle_me(ctx)
 
     @commands.command(name="топ")
-    async def leaders_command(self, ctx):
-        """Обработка команды !топ"""
-        if not self.active:
-            return
-        await self.command_handler.handle_leaders(ctx)
+    async def leaders(self, ctx) -> None:
+        """Handle leaderboard command."""
+        if self.active:
+            await self.command_handler.handle_leaders(ctx)
 
     @commands.command(name="ботзаткнись")
-    async def sleep_command(self, ctx):
-        """
-        Команда для отключения обработки команд (только для администраторов)
-        """
+    async def bot_sleep(self, ctx) -> None:
+        """Deactivate bot (admin only)."""
         if ctx.author.name.lower() not in self.config.get("admins", []):
-            self.logger.warning(
-                f"Попытка отключения от неавторизованного пользователя: {ctx.author.name}"
-            )
             return
-
-        self.logger.warning(
-            f"🛑 Запрос на отключение от администратора: {ctx.author.name}"
-        )
         self.active = False
         await ctx.send("banka Алибидерчи, лошки! Выключаюсь...")
 
     @commands.command(name="ботговори")
-    async def wake_command(self, ctx):
-        """
-        Команда для включения обработки команд (только для администраторов)
-        """
+    async def bot_wake(self, ctx) -> None:
+        """Activate bot (admin only)."""
         if ctx.author.name.lower() not in self.config.get("admins", []):
-            self.logger.warning(
-                f"Попытка активации от неавторизованного пользователя: {ctx.author.name}"
-            )
             return
-
-        self.logger.warning(
-            f"🟢 Запрос на активацию от администратора: {ctx.author.name}"
-        )
         self.active = True
         await ctx.send("deshovka Бот снова в строю, очкошники! GAGAGA")
 
-    async def periodic_token_refresh(self):
-        """Периодическое обновление токена"""
-        self.logger.info("⏳ Запущена задача периодического обновления токена")
-        while True:
-            try:
-                await asyncio.sleep(self.config["refresh_token_delay_time"])
-                self.logger.info("🕒 Запуск планового обновления токена...")
-                new_token = await self.token_manager.refresh_access_token()
-                await self.update_token(new_token)
-            except asyncio.CancelledError:
-                self.logger.info("🛑 Задача обновления токена отменена")
-                break
-            except Exception as e:
-                self.logger.error(f"🚨 Ошибка в обновлении токена: {e}")
-                await asyncio.sleep(60)
-
-    async def close(self):
-        """Закрытие всех ресурсов (при полном выключении)"""
-        if self._closing:
-            return
-
-        self._closing = True
-        self.logger.info("🛑 Начало процесса остановки бота...")
+    async def close(self) -> None:
+        """Clean up resources and shutdown bot gracefully."""
+        logger.info("Initiating bot shutdown...")
 
         if self.token_refresh_task:
             self.token_refresh_task.cancel()
-            try:
+            with suppress(asyncio.CancelledError):
                 await self.token_refresh_task
-            except asyncio.CancelledError:
-                self.logger.info("🛑 Задача обновления токена отменена")
-
-        if hasattr(self, "_http") and self._http:
-            await self._http.close()
-            self.logger.info("🔌 HTTP-клиент закрыт")
 
         if self.db:
-            await self.db.close()
-            self.logger.info("🔌 Соединение с базой данных закрыто")
-
-        # Закрываем CommandHandler
-        if hasattr(self, "command_handler"):
-            await self.command_handler.close()
+            with suppress(Exception):
+                await self.db.close()
 
         await super().close()
-        self.logger.info("🔌 Все соединения закрыты")
 
 
-async def main():
-    """Основная асинхронная функция запуска приложения"""
+async def main() -> None:
+    """Main application entry point."""
     try:
-        logger.info("🔄 Проверяем актуальность токена перед запуском...")
+        logger.info("Initializing token validation...")
         token_manager = TokenManager(CONFIG_PATH)
         await token_manager.get_access_token()
-        logger.info("✅ Токен готов к использованию")
 
         bot = TwitchBot(token_manager)
-        logger.info("🤖 Запускаем бота...")
         await bot.start()
 
     except Exception as e:
-        logger.critical(f"🚨 Критическая ошибка при запуске: {e}", exc_info=True)
-    finally:
-        logger.info("👋 Приложение завершает работу")
+        logger.critical(f"Fatal startup error: {e}", exc_info=True)
+        raise
 
 
 if __name__ == "__main__":
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("🛑 Приложение остановлено пользователем")
-    except Exception as e:
-        logger.critical(f"💀 Фатальная ошибка: {e}", exc_info=True)
+    asyncio.run(main())

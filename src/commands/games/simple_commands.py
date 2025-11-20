@@ -3,25 +3,28 @@ import time
 import asyncio
 
 from src.commands.games.base_game import BaseGame
-from src.utils.helpers import format_duration, is_privileged
+from src.commands.helpers import format_duration, is_privileged
 
 
 class SimpleCommandsGame(BaseGame):
-    """Простые команды (дрын, жопа, бочка)"""
+    """Handles simple chat commands like club, butt, and test barrel."""
 
     async def handle_club_command(self, ctx) -> None:
-        """Обработка команды !дрын"""
+        """
+        Handle the club command for moderators.
+
+        Args:
+            ctx: Command context object
+        """
         start_time = time.time()
         try:
             if not is_privileged(ctx.author):
-                self.logger.warning("Отказ: нет привилегий")
+                self.logger.warning("Access denied: insufficient privileges")
                 return
 
-            # Проверяем кулдаун команды
             if not self.check_cooldown("club"):
                 return
 
-            # Обновляем кэш если нужно
             if self.cache_manager.should_update_cache():
                 asyncio.create_task(
                     self.cache_manager._update_chatters_cache(ctx.channel, self.bot.nick)
@@ -31,17 +34,16 @@ class SimpleCommandsGame(BaseGame):
 
             cached_chatters = self.cache_manager.get_cached_chatters()
             if not cached_chatters:
-                self.logger.warning("🚫 Нет подходящих пользователей для команды 'дрын'")
+                self.logger.warning("No suitable users found for club command")
                 return
 
             target_chatter = random.choice(cached_chatters)
             target_id = await self.user_manager.get_user_id(target_chatter.name, target_chatter)
 
             if not target_id:
-                self.logger.error(f"❌ Не удалось получить ID пользователя: {target_chatter.name}")
+                self.logger.error(f"Failed to get user ID: {target_chatter.name}")
                 return
 
-            # Параллельное выполнение
             timeout_task = asyncio.create_task(
                 self.api.timeout_user(
                     user_id=target_id,
@@ -55,27 +57,26 @@ class SimpleCommandsGame(BaseGame):
             status, response = await timeout_task
 
             if status == 200:
-                self.update_cooldown("club")  # Обновляем кулдаун только при успехе
-                self.logger.info(f"🪵 Дрын применён к {target_chatter.name}")
+                self.update_cooldown("club")
+                self.logger.info(f"Club applied to {target_chatter.name}")
                 asyncio.create_task(
                     self.cache_manager._update_chatters_cache(ctx.channel, self.bot.nick)
                 )
             else:
-                # Если таймаут не удался, не обновляем кулдаун
-                self.logger.warning(f"⚠️ Таймаут не удался: {status}")
+                self.logger.warning(f"Timeout failed: {status}")
 
         except Exception as e:
-            self.logger.error(f"🚨 Ошибка команды 'дрын': {e}")
-        finally:
-            execution_time = (time.time() - start_time) * 1000
-            if execution_time > 500:
-                self.logger.info(f"⏱️ Время выполнения !дрын: {execution_time:.2f}ms")
+            self.logger.error(f"Club command error: {e}")
 
     async def handle_butt_command(self, ctx) -> None:
-        """Обработка команды !жопа"""
+        """
+        Handle the butt command with random chance mechanics.
+
+        Args:
+            ctx: Command context object
+        """
         start_time = time.time()
         try:
-            # Проверяем кулдаун команды
             if not self.check_cooldown("butt"):
                 return
 
@@ -85,10 +86,9 @@ class SimpleCommandsGame(BaseGame):
             if random_chance < 90:
                 message = f"Жопа @{ctx.author.name} воняет на {random_chance}% xdding"
                 await ctx.send(message)
-                self.update_cooldown("butt")  # Обновляем кулдаун
+                self.update_cooldown("butt")
                 return
 
-            # Специальные случаи
             duration = 600 if random_chance == 100 else 60
             reason = "extreme жопа" if random_chance == 100 else "жопа"
             message = (
@@ -101,12 +101,12 @@ class SimpleCommandsGame(BaseGame):
 
             if privileged:
                 await ctx.send(message + " ТАКИЕ ТВОИ МОДЕРЫ ХУЕГЛОТАЛКИ GAGAGA")
-                self.logger.info(f"🛡️ Модератор избежал наказания: {ctx.author.name}")
-                self.update_cooldown("butt")  # Обновляем кулдаун даже для модераторов
+                self.logger.info(f"Moderator avoided punishment: {ctx.author.name}")
+                self.update_cooldown("butt")
             else:
                 target_id = await self.user_manager.get_user_id(ctx.author.name, ctx.author)
                 if not target_id:
-                    self.logger.error(f"❌ Не удалось получить ID пользователя: {ctx.author.name}")
+                    self.logger.error(f"Failed to get user ID: {ctx.author.name}")
                     return
 
                 status, response = await self.api.timeout_user(
@@ -118,40 +118,37 @@ class SimpleCommandsGame(BaseGame):
 
                 if status == 200:
                     await ctx.send(message)
-                    self.update_cooldown("butt")  # Обновляем кулдаун при успехе
+                    self.update_cooldown("butt")
                 else:
-                    # Если таймаут не удался, не обновляем кулдаун
-                    self.logger.warning(f"⚠️ Таймаут не удался: {status}")
+                    self.logger.warning(f"Timeout failed: {status}")
 
         except Exception as e:
-            self.logger.error(f"🚨 Ошибка команды 'жопа': {e}")
-        finally:
-            execution_time = (time.time() - start_time) * 1000
-            if execution_time > 500:
-                self.logger.info(f"⏱️ Время выполнения !жопа: {execution_time:.2f}ms")
+            self.logger.error(f"Butt command error: {e}")
 
     async def handle_test_barrel_command(self, ctx) -> None:
-        """Обработка команды !тестовая_бочка"""
+        """
+        Handle test barrel command for administrators.
+
+        Args:
+            ctx: Command context object
+        """
         start_time = time.time()
         try:
-            # Проверяем права администратора
             if ctx.author.name.lower() not in self.bot.config.get("admins", []):
-                self.logger.warning(f"Попытка бочки от неавторизованного пользователя: {ctx.author.name}")
+                self.logger.warning(f"Unauthorized barrel attempt: {ctx.author.name}")
                 return
 
-            # Проверяем кулдаун команды
             if not self.check_cooldown("test_barrel"):
                 return
 
             valid_chatters = self.cache_manager._filter_chatters(ctx.channel.chatters)
             if not valid_chatters:
-                self.logger.warning("🚫 Нет подходящих пользователей для команды 'бочка'")
+                self.logger.warning("No suitable users for barrel command")
                 return
 
             selected_count = min(10, len(valid_chatters))
             targets = random.sample(valid_chatters, selected_count)
 
-            # Параллельное выполнение
             timeout_tasks = []
             for target in targets:
                 target_id = await self.user_manager.get_user_id(target.name, target)
@@ -166,7 +163,7 @@ class SimpleCommandsGame(BaseGame):
                     )
 
             if not timeout_tasks:
-                self.logger.error("❌ Не удалось получить ID пользователей")
+                self.logger.error("Failed to get user IDs")
                 return
 
             results = await asyncio.gather(*timeout_tasks, return_exceptions=True)
@@ -174,7 +171,7 @@ class SimpleCommandsGame(BaseGame):
 
             for i, result in enumerate(results):
                 if isinstance(result, Exception):
-                    self.logger.error(f"🚨 Ошибка при обработке {targets[i].name}: {result}")
+                    self.logger.error(f"Error processing {targets[i].name}: {result}")
                     continue
 
                 status, response = result
@@ -188,16 +185,16 @@ class SimpleCommandsGame(BaseGame):
                 message = f"{ctx.author.name} Тест. Бочка дала осечку!"
 
             await ctx.send(message)
-            self.update_cooldown("test_barrel")  # Обновляем кулдаун
-            self.logger.info(f"✅ Тестовая бочка завершена. Успешно: {len(punished_users)}")
+            self.update_cooldown("test_barrel")
+            self.logger.info(f"Test barrel completed. Successful: {len(punished_users)}")
 
         except Exception as e:
-            self.logger.error(f"💥 Критическая ошибка в 'тестовая бочка': {e}")
+            self.logger.error(f"Critical error in test barrel: {e}")
         finally:
             execution_time = (time.time() - start_time) * 1000
             if execution_time > 500:
-                self.logger.info(f"⏱️ Время выполнения !тестовая_бочка: {execution_time:.2f}ms")
+                self.logger.info(f"Test barrel execution time: {execution_time:.2f}ms")
 
     async def handle_command(self, ctx) -> None:
-        """Не используется для простых команд"""
+        """Not used for simple commands."""
         pass

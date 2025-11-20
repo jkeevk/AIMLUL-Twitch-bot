@@ -4,10 +4,20 @@ from typing import Dict, Any
 
 
 def load_settings(config_path: str = "settings.ini") -> Dict[str, Any]:
-    """Загружает настройки бота из INI-файла"""
+    """
+    Load bot configuration settings from INI file.
+
+    Creates default configuration file if it doesn't exist and returns
+    parsed settings with appropriate data types.
+
+    Args:
+        config_path: Path to the configuration file
+
+    Returns:
+        Dictionary containing all bot settings with proper typing
+    """
     config = configparser.ConfigParser()
 
-    # Создаем конфиг по умолчанию, если файл не существует
     if not os.path.exists(config_path):
         config["SETTINGS"] = {
             "command_delay_time": "30",

@@ -1,18 +1,21 @@
-import time
 from typing import Dict
 
 from src.commands.games.base_game import BaseGame
 from src.commands.models.game_models import BaseCollector, CollectorConfig
-from src.utils.helpers import is_privileged
+from src.commands.helpers import is_privileged
 
 
 class CollectorsGame(BaseGame):
-    """Игра с коллекторами (гном, applecat)"""
+    """
+    Collector-based game implementation.
+
+    Handles games that require collecting multiple participants
+    before triggering an action (gnome, applecat collectors).
+    """
 
     def __init__(self, command_handler):
         super().__init__(command_handler)
 
-        # Создаем коллекторы
         self.collectors: Dict[str, BaseCollector] = {
             "gnome": BaseCollector(CollectorConfig(
                 name="gnome",
@@ -33,47 +36,58 @@ class CollectorsGame(BaseGame):
         }
 
     async def handle_gnome(self, message) -> None:
-        """Обрабатывает сообщение GNOME"""
+        """
+        Handle GNOME collector trigger.
+
+        Args:
+            message: Incoming chat message
+        """
         await self._handle_collector(message, "gnome")
 
     async def handle_applecat(self, message) -> None:
-        """Обрабатывает сообщение applecatPanik"""
+        """
+        Handle applecatPanik collector trigger.
+
+        Args:
+            message: Incoming chat message
+        """
         await self._handle_collector(message, "applecatpanik")
 
     async def _handle_collector(self, message, collector_type: str) -> None:
-        """Обработчик для команд со сбором участников"""
+        """
+        Process collector participation and trigger actions.
+
+        Args:
+            message: Incoming chat message
+            collector_type: Type of collector to handle
+        """
         try:
             if is_privileged(message.author):
                 return
 
-            # Защита от спама
             if not self.cache_manager.can_user_participate(message.author.id):
                 return
 
             self.cache_manager.update_user_cooldown(message.author.id)
             collector = self.collectors[collector_type]
 
-            # Автосброс при долгом бездействии
             if collector.should_reset() and collector.participants:
-                self.logger.info(f"🔄 Автосброс сборщика {collector_type}")
+                self.logger.info(f"Автосброс сборщика {collector_type}")
                 collector.reset()
 
-            # Добавление участника
             if not collector.add(message.author.id, message.author.name):
                 return
 
             self.logger.info(
-                f"➕ {message.author.name} добавлен в {collector_type}. Всего: {len(collector.participants)}"
+                f"{message.author.name} добавлен в {collector_type}. Всего: {len(collector.participants)}"
             )
 
-            # Проверка заполненности
             if not collector.is_full():
                 return
 
-            # Берем случайного участника
             target_id, target_name = collector.get_random()
             self.logger.info(
-                f"🔨 Попытка таймаута {target_name} ({target_id}) из сбора {collector_type}"
+                f"Попытка таймаута {target_name} ({target_id}) из сбора {collector_type}"
             )
 
             status, response = await self.api.timeout_user(
@@ -88,18 +102,22 @@ class CollectorsGame(BaseGame):
                     collector.config.timeout_message.format(target_name=target_name)
                 )
             elif status == 401:
-                self.logger.error("❌ Неавторизован - требуется обновление токена")
+                self.logger.error("Неавторизован - требуется обновление токена")
             elif status == 429:
-                self.logger.warning("⚠️ Слишком много запросов - снизьте частоту")
+                self.logger.warning("Слишком много запросов - снизьте частоту")
             else:
-                self.logger.error(f"🚨 Ошибка API: {status} - {response}")
+                self.logger.error(f"Ошибка API: {status} - {response}")
 
-            # Сбрасываем сборщик
             collector.reset()
 
         except Exception as e:
-            self.logger.error(f"🚨 Ошибка обработки {collector_type}: {e}")
+            self.logger.error(f"Ошибка обработки {collector_type}: {e}")
 
     async def handle_command(self, ctx) -> None:
-        """Не используется для коллекторов (они обрабатываются через сообщения)"""
+        """
+        Not used for collectors (handled via message triggers).
+
+        Args:
+            ctx: Command context (unused)
+        """
         pass

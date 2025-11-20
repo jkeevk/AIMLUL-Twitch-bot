@@ -1,14 +1,20 @@
 import random
 import asyncio
 import time
+from typing import Tuple, List
 
 from src.commands.games.base_game import BaseGame
 from src.commands.models.game_models import GameRank
-from src.utils.helpers import is_privileged, pluralize
+from src.commands.helpers import is_privileged, pluralize
 
 
 class TwentyOneGame(BaseGame):
-    """Игра в 21 очко"""
+    """
+    Twenty-one card game implementation.
+
+    Handles the 21-point card game mechanics including matchmaking,
+    scoring, statistics tracking, and leaderboard functionality.
+    """
 
     def __init__(self, command_handler):
         super().__init__(command_handler)
@@ -26,19 +32,22 @@ class TwentyOneGame(BaseGame):
             90: "Главный очкошник",
         })
 
-        # Игровые атрибуты
         self.twenty_one_lock = asyncio.Lock()
-        self.twenty_one_participants = []
-        self.twenty_one_last_added = 0
-        self.twenty_one_cooldown = 0
+        self.twenty_one_participants: List[Tuple[str, str]] = []
+        self.twenty_one_last_added: float = 0
+        self.twenty_one_cooldown: float = 0
 
     async def handle_command(self, ctx) -> None:
-        """Обработка команды !очко"""
+        """
+        Handle the main twenty-one game command.
+
+        Args:
+            ctx: Command context object
+        """
         start_time = time.time()
         try:
             current_time = self.command_handler.get_current_time()
 
-            # Проверяем глобальный кулдаун команды !очко
             if not self.check_cooldown("twenty_one"):
                 return
 
@@ -46,7 +55,7 @@ class TwentyOneGame(BaseGame):
                 if (current_time - self.twenty_one_last_added > 360 and
                         self.twenty_one_participants):
                     self.twenty_one_participants.clear()
-                    self.logger.info("🔄 Автосброс участников очко")
+                    self.logger.info("Автосброс участников очко")
 
                 if any(user[0] == ctx.author.id for user in self.twenty_one_participants):
                     await ctx.send(f"@{ctx.author.name} вы уже в игре! Ждем соперника...")
@@ -55,7 +64,7 @@ class TwentyOneGame(BaseGame):
                 self.twenty_one_participants.append((str(ctx.author.id), ctx.author.name))
                 self.twenty_one_last_added = current_time
                 count = len(self.twenty_one_participants)
-                self.logger.info(f"➕ {ctx.author.name} добавлен в очко. Всего: {count}")
+                self.logger.info(f"{ctx.author.name} добавлен в очко. Всего: {count}")
 
                 if count < 2:
                     await ctx.send(f"@{ctx.author.name} ждет соперника для игры в очко!")
@@ -73,7 +82,7 @@ class TwentyOneGame(BaseGame):
                     f"Джонни Додеп: Ничья! @{player1_name} и @{player2_name} "
                     f"сыграли вничью GAGAGA ({player1_name}: {score1} | {player2_name}: {score2})"
                 )
-                self.update_cooldown("twenty_one")  # Обновляем кулдаун даже при ничье
+                self.update_cooldown("twenty_one")
                 return
 
             winner_name, loser_name, winner_id, loser_id = self._determine_winner(
@@ -85,17 +94,28 @@ class TwentyOneGame(BaseGame):
             await self._handle_game_result(ctx, winner_name, loser_name, winner_id, loser_id,
                                            player1_name, player2_name, score1, score2)
 
-            self.update_cooldown("twenty_one")  # Обновляем кулдаун после завершения игры
+            self.update_cooldown("twenty_one")
 
         except Exception as e:
-            self.logger.error(f"🚨 Ошибка в команде !очко: {e}")
+            self.logger.error(f"Ошибка в команде !очко: {e}")
         finally:
             execution_time = (time.time() - start_time) * 1000
             if execution_time > 500:
-                self.logger.info(f"⏱️ Время выполнения !очко: {execution_time:.2f}ms")
+                self.logger.info(f"Время выполнения !очко: {execution_time:.2f}ms")
 
     def _determine_winner(self, score1: int, score2: int, player1_data: tuple, player2_data: tuple) -> tuple:
-        """Определяет победителя в игре 21"""
+        """
+        Determine the winner based on scores and game rules.
+
+        Args:
+            score1: First player's score
+            score2: Second player's score
+            player1_data: Tuple of (player1_id, player1_name)
+            player2_data: Tuple of (player2_id, player2_name)
+
+        Returns:
+            Tuple of (winner_name, loser_name, winner_id, loser_id)
+        """
         p1_id, p1_name = player1_data
         p2_id, p2_name = player2_data
 
@@ -113,7 +133,20 @@ class TwentyOneGame(BaseGame):
 
     async def _handle_game_result(self, ctx, winner_name: str, loser_name: str, winner_id: str, loser_id: str,
                                   player1_name: str, player2_name: str, score1: int, score2: int) -> None:
-        """Обрабатывает результат игры"""
+        """
+        Process game result including statistics and timeout.
+
+        Args:
+            ctx: Command context
+            winner_name: Winner's display name
+            loser_name: Loser's display name
+            winner_id: Winner's user ID
+            loser_id: Loser's user ID
+            player1_name: First player's name
+            player2_name: Second player's name
+            score1: First player's score
+            score2: Second player's score
+        """
         if self.db:
             try:
                 previous_winner_wins, _ = await self.db.get_stats(winner_id)
@@ -131,11 +164,11 @@ class TwentyOneGame(BaseGame):
                     )
 
                 self.logger.info(
-                    f"📊 Статистика обновлена: {winner_name} ({winner_wins}/{winner_losses}) | "
+                    f"Статистика обновлена: {winner_name} ({winner_wins}/{winner_losses}) | "
                     f"{loser_name} ({loser_wins}/{loser_losses})"
                 )
             except Exception as e:
-                self.logger.error(f"🚨 Ошибка сохранения статистики: {e}")
+                self.logger.error(f"Ошибка сохранения статистики: {e}")
 
         await ctx.send(
             f"Джонни Додеп: @{winner_name} победил! "
@@ -143,10 +176,9 @@ class TwentyOneGame(BaseGame):
             f"({player1_name}: {score1} | {player2_name}: {score2})"
         )
 
-        # Таймаут для проигравшего
         loser_is_mod = any(
             chatter.name.lower() == loser_name.lower() and is_privileged(chatter)
-            for chatter in self.cache_manager.get_cached_chatters()
+            for chatter in ctx.channel.chatters
         )
 
         if not loser_is_mod:
@@ -157,10 +189,15 @@ class TwentyOneGame(BaseGame):
                 reason="очко",
             )
             if status == 200:
-                self.logger.info(f"⏳ Таймаут 15s для {loser_name}")
+                self.logger.info(f"Таймаут 15s для {loser_name}")
 
     async def handle_me_command(self, ctx) -> None:
-        """Обработка команды !я для статистики"""
+        """
+        Handle player statistics command.
+
+        Args:
+            ctx: Command context
+        """
         if not self.check_cooldown("me"):
             return
 
@@ -199,11 +236,16 @@ class TwentyOneGame(BaseGame):
             self.update_cooldown("me")
 
         except Exception as e:
-            self.logger.error(f"🚨 Ошибка команды 'я': {e}")
+            self.logger.error(f"Ошибка команды 'я': {e}")
             await ctx.send("Произошла ошибка при получении статистики")
 
     async def handle_leaders_command(self, ctx) -> None:
-        """Обработка команды !лидеры"""
+        """
+        Handle leaderboard display command.
+
+        Args:
+            ctx: Command context
+        """
         if not self.check_cooldown("leaders"):
             return
 
@@ -230,5 +272,5 @@ class TwentyOneGame(BaseGame):
             self.update_cooldown("leaders")
 
         except Exception as e:
-            self.logger.error(f"🚨 Ошибка команды 'лидеры': {e}")
+            self.logger.error(f"Ошибка команды 'лидеры': {e}")
             await ctx.send("Произошла ошибка при получении рейтинга")
