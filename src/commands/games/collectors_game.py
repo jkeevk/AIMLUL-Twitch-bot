@@ -79,25 +79,25 @@ class CollectorsGame(BaseGame):
             collector = self.collectors[collector_type]
 
             if collector.should_reset() and collector.participants:
-                self.logger.info(f"Автосброс сборщика {collector_type}")
+                self.logger.info(f"Auto-reset collector {collector_type}")
                 collector.reset()
 
             if not collector.add(message.author.id, message.author.name):
                 return
 
-            self.logger.info(f"{message.author.name} добавлен в {collector_type}. Всего: {len(collector.participants)}")
+            self.logger.info(f"{message.author.name} added to {collector_type}. Total: {len(collector.participants)}")
 
             if not collector.is_full():
                 return
 
             random_target = collector.get_random()
             if random_target is None:
-                self.logger.warning(f"{collector_type} не смог выбрать случайного участника")
+                self.logger.warning(f"{collector_type} could not select a random participant")
                 return
 
             target_id, target_name = random_target
 
-            self.logger.info(f"Попытка таймаута {target_name} ({target_id}) из сбора {collector_type}")
+            self.logger.info(f"Attempting to timeout {target_name} ({target_id}) from collector {collector_type}")
 
             status, response = await self.api.timeout_user(
                 user_id=target_id,
@@ -109,16 +109,16 @@ class CollectorsGame(BaseGame):
             if status == 200:
                 await message.channel.send(collector.config.timeout_message.format(target_name=target_name))
             elif status == 401:
-                self.logger.error("Неавторизован - требуется обновление токена")
+                self.logger.error("Unauthorized - token refresh required")
             elif status == 429:
-                self.logger.warning("Слишком много запросов - снизьте частоту")
+                self.logger.warning("Too many requests - slow down")
             else:
-                self.logger.error(f"Ошибка API: {status} - {response}")
+                self.logger.error(f"API error: {status} - {response}")
 
             collector.reset()
 
         except Exception as e:
-            self.logger.error(f"Ошибка обработки {collector_type}: {e}")
+            self.logger.error(f"Error handling {collector_type}: {e}")
 
     async def handle_command(self, ctx: Context) -> None:
         """

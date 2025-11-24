@@ -1,7 +1,7 @@
 import logging
 from typing import Any
 
-logger = logging.getLogger("CtxFactory")
+logger = logging.getLogger(__name__)
 
 
 async def create_fake_context(bot: Any, username: str, channel_name: str, user_id: str) -> Any:

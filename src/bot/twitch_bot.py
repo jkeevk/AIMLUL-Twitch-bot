@@ -18,7 +18,7 @@ from src.eventsub.handlers import handle_eventsub_reward
 from src.eventsub.manager import EventSubManager
 from src.utils.token_manager import TokenManager
 
-logger = logging.getLogger("TwitchBot")
+logger = logging.getLogger(__name__)
 CONFIG_PATH = "/app/settings.ini"
 
 

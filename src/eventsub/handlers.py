@@ -3,7 +3,7 @@ from typing import Any
 
 from src.eventsub.reward_handlers import reward_handlers
 
-logger = logging.getLogger("EventSubHandlers")
+logger = logging.getLogger(__name__)
 
 
 async def handle_eventsub_reward(event: Any, bot: Any) -> None:

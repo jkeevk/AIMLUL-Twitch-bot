@@ -7,10 +7,9 @@ from twitchio.ext.commands import Context
 
 from src.commands.games.base_game import BaseGame
 from src.commands.models.game_models import GameRank
+from src.commands.permissions import PRIVILEGED_USERS
 from src.commands.text_inflect import pluralize
-from src.core.config_loader import load_settings
 
-PRIVILEGED_USERS = load_settings()["privileged"]
 PRIVILEGED_USERS_LOWER = {name.lower() for name in PRIVILEGED_USERS}
 
 
@@ -77,7 +76,7 @@ class TwentyOneGame(BaseGame):
                 self.player_queue.append((user_id, user_name))
                 queue_size = len(self.player_queue)
 
-                self.logger.info(f"{user_name} добавлен в очередь очко. Всего в очереди: {queue_size}")
+                self.logger.info(f"{user_name} added to 'очко' queue. Total in queue: {queue_size}")
 
                 if queue_size == 1:
                     await ctx.send(f"@{user_name} ждет соперника для игры в очко! GAMBA")
@@ -105,7 +104,7 @@ class TwentyOneGame(BaseGame):
                 #     )
 
         except Exception as e:
-            self.logger.error(f"Ошибка при добавлении в очередь: {e}")
+            self.logger.error(f"Error adding to queue: {e}")
 
     async def _process_queue_immediately(self) -> None:
         """Run a game immediately, without waiting, then schedule further games if possible."""
@@ -117,7 +116,7 @@ class TwentyOneGame(BaseGame):
                     self.timer_task = asyncio.create_task(self._process_queue_with_timer())
 
         except Exception as e:
-            self.logger.error(f"Ошибка при мгновенной обработке очереди: {e}")
+            self.logger.error(f"Error processing queue immediately: {e}")
 
     async def _process_queue_with_timer(self) -> None:
         """Run games in a loop, waiting `timer_seconds` between them."""
@@ -127,7 +126,7 @@ class TwentyOneGame(BaseGame):
 
                 async with self.queue_lock:
                     if len(self.player_queue) < 2:
-                        self.logger.info("Очередь опустела, останавливаем таймер")
+                        self.logger.info("Queue is empty, stopping timer")
                         break
 
                     if self.is_processing:
@@ -290,7 +289,7 @@ class TwentyOneGame(BaseGame):
                     await channel.send(f"🎉 @{winner_name} достиг нового ранга: {new_rank}! 🏆")
 
             except Exception as e:
-                self.logger.error(f"Ошибка сохранения статистики: {e}")
+                self.logger.error(f"Error saving statistics: {e}")
 
         await channel.send(
             f"Джонни Додеп: @{winner_name} победил! "
@@ -307,7 +306,7 @@ class TwentyOneGame(BaseGame):
                     reason="очко",
                 )
             except Exception as e:
-                self.logger.warning(f"Ошибка при таймауте: {e}")
+                self.logger.warning(f"Error during timeout: {e}")
 
     async def handle_me_command(self, ctx: Context) -> None:
         """
@@ -356,7 +355,7 @@ class TwentyOneGame(BaseGame):
             self.update_cooldown("me")
 
         except Exception as e:
-            self.logger.error(f"Ошибка команды 'я': {e}")
+            self.logger.error(f"Error in 'me' command: {e}")
             await ctx.send("Произошла ошибка при получении статистики")
 
     async def handle_leaders_command(self, ctx: Context) -> None:
@@ -393,7 +392,7 @@ class TwentyOneGame(BaseGame):
             self.update_cooldown("leaders")
 
         except Exception as e:
-            self.logger.error(f"Ошибка команды 'лидеры': {e}")
+            self.logger.error(f"Error in 'leaders' command: {e}")
             await ctx.send("Произошла ошибка при получении рейтинга")
 
     async def close(self) -> None:

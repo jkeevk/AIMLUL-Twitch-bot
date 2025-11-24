@@ -2,7 +2,7 @@ import asyncio
 import logging
 from typing import Any
 
-logger = logging.getLogger("TokenRefresh")
+logger = logging.getLogger(__name__)
 
 
 async def periodic_refresh(bot: Any) -> None:

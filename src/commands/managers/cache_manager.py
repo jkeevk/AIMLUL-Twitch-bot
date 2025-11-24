@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import time
 from typing import Any
 
@@ -83,6 +84,7 @@ class CacheManager:
         self.user_id_cache: UserIDCache = UserIDCache()
         self._user_cooldowns: dict[str, float] = {}
         self.command_cooldowns: dict[str, int] = {}
+        self.logger = logging.getLogger(__name__)
 
     def _is_valid_target(self, chatter: Any) -> bool:
         """
@@ -128,8 +130,7 @@ class CacheManager:
                 self._cached_chatters = self.filter_chatters(channel.chatters)
                 self._last_cache_update = time.time()
             except Exception as e:
-                logger = getattr(self, "logger", print)
-                logger(f"Cache update error: {e}")
+                self.logger.error("Cache update error", exc_info=e)
 
     def get_cached_chatters(self) -> list[Any]:
         """

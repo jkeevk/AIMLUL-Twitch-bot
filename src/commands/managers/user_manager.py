@@ -1,6 +1,9 @@
+import logging
 from typing import Any, Protocol
 
 from src.commands.managers.cache_manager import CacheManager
+
+logger = logging.getLogger(__name__)
 
 
 class HasID(Protocol):
@@ -47,6 +50,6 @@ class UserManager:
                 self.cache_manager.user_id_cache.set(username, str(user_data[0].id))
                 return str(user_data[0].id)
         except Exception as e:
-            print(f"Error retrieving ID for {username}: {e}")
+            logger.error(f"Error retrieving ID for {username}: {e}")
 
         return None

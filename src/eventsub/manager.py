@@ -7,7 +7,7 @@ from twitchio.ext import eventsub
 if TYPE_CHECKING:
     from src.bot.twitch_bot import TwitchBot
 
-logger = logging.getLogger("EventSub")
+logger = logging.getLogger(__name__)
 
 
 class EventSubManager:

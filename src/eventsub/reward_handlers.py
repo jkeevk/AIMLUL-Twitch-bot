@@ -3,7 +3,7 @@ from typing import Any
 
 from src.eventsub.ctx_factory import create_fake_context
 
-logger = logging.getLogger("RewardHandlers")
+logger = logging.getLogger(__name__)
 
 
 async def twenty_one_handler(event: Any, bot: Any) -> None:
