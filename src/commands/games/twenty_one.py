@@ -1,11 +1,17 @@
-import random
 import asyncio
-import time
-from typing import Tuple, List
+import random
+from collections import deque
+from typing import Any
+
+from twitchio.ext.commands import Context
 
 from src.commands.games.base_game import BaseGame
 from src.commands.models.game_models import GameRank
-from src.commands.helpers import is_privileged, pluralize
+from src.commands.text_inflect import pluralize
+from src.core.config_loader import load_settings
+
+PRIVILEGED_USERS = load_settings()["privileged"]
+PRIVILEGED_USERS_LOWER = {name.lower() for name in PRIVILEGED_USERS}
 
 
 class TwentyOneGame(BaseGame):
@@ -16,94 +22,208 @@ class TwentyOneGame(BaseGame):
     scoring, statistics tracking, and leaderboard functionality.
     """
 
-    def __init__(self, command_handler):
+    def __init__(self, command_handler: Any):
         super().__init__(command_handler)
 
-        self.RANKS = GameRank({
-            0: "Гном-лудоман",
-            10: "Картёжный гоблин",
-            20: "Краплёный хряк",
-            30: "Гном-картокрад",
-            40: "Гоблин-блефун",
-            50: "Важный свин",
-            60: "Додепный гоблин",
-            70: "Хряк покерного стола",
-            80: "Уважаемый очкошник",
-            90: "Главный очкошник",
-        })
+        self.RANKS = GameRank(
+            {
+                0: "Гном-лудоман",
+                10: "Картёжный гоблин",
+                20: "Краплёный хряк",
+                30: "Гном-картокрад",
+                40: "Гоблин-блефун",
+                50: "Важный свин",
+                60: "Додепный гоблин",
+                70: "Чиркаш-мошенник",
+                80: "Главный в туза",
+                90: "Свин-отыгрун",
+                100: "Валетный эксперт",
+                120: "Уважаемый очкошник",
+                150: "Хряк-виртуоз",
+                200: "Король додепа",
+                250: "Рисковый очкошник",
+                300: "Властелин карт",
+                350: "Ставочный барон",
+                400: "Главный по додепу",
+                450: "Божество очка",
+                500: "Абсолютный лудоман",
+            }
+        )
 
-        self.twenty_one_lock = asyncio.Lock()
-        self.twenty_one_participants: List[Tuple[str, str]] = []
-        self.twenty_one_last_added: float = 0
-        self.twenty_one_cooldown: float = 0
+        self.queue_lock = asyncio.Lock()
+        self.player_queue: deque[tuple[str, str]] = deque()
+        self.is_processing = False
+        self.timer_task: asyncio.Task[Any] | None = None
+        self.timer_seconds = 45
+        self.last_game_time: float | None = None
+        self.is_first_pair = True
 
-    async def handle_command(self, ctx) -> None:
+    async def handle_command(self, ctx: Context) -> None:
         """
         Handle the main twenty-one game command.
 
         Args:
             ctx: Command context object
         """
-        start_time = time.time()
         try:
-            current_time = self.command_handler.get_current_time()
+            user_id = str(ctx.author.id)
+            user_name = ctx.author.name
 
-            if not self.check_cooldown("twenty_one"):
+            async with self.queue_lock:
+                if any(uid == user_id for uid, _ in self.player_queue):
+                    await ctx.send(f"@{user_name} вы уже в очереди! Ждем соперника...")
+                    return
+
+                self.player_queue.append((user_id, user_name))
+                queue_size = len(self.player_queue)
+
+                self.logger.info(f"{user_name} добавлен в очередь очко. Всего в очереди: {queue_size}")
+
+                if queue_size == 1:
+                    await ctx.send(f"@{user_name} ждет соперника для игры в очко! GAMBA")
+                    self.is_first_pair = True
+
+                elif queue_size == 2:
+                    current_time = asyncio.get_event_loop().time()
+
+                    if self.is_first_pair and (
+                        self.last_game_time is None or (current_time - self.last_game_time) >= 45
+                    ):
+                        if self.timer_task and not self.timer_task.done():
+                            self.timer_task.cancel()
+                        self.timer_task = asyncio.create_task(self._process_queue_immediately())
+                        self.is_first_pair = False
+                    else:
+                        if self.timer_task is None or self.timer_task.done():
+                            self.timer_task = asyncio.create_task(self._process_queue_with_timer())
+                # # to inform participants of their queue position
+                # else:
+                #     position = queue_size
+                #     await ctx.send(
+                #         f"@{user_name} в очереди! Позиция: {position}. "
+                #         f"Следующая игра через {self.timer_seconds} секунд!"
+                #     )
+
+        except Exception as e:
+            self.logger.error(f"Ошибка при добавлении в очередь: {e}")
+
+    async def _process_queue_immediately(self) -> None:
+        """Run a game immediately, without waiting, then schedule further games if possible."""
+        try:
+            await self._process_single_game()
+
+            async with self.queue_lock:
+                if len(self.player_queue) >= 2:
+                    self.timer_task = asyncio.create_task(self._process_queue_with_timer())
+
+        except Exception as e:
+            self.logger.error(f"Ошибка при мгновенной обработке очереди: {e}")
+
+    async def _process_queue_with_timer(self) -> None:
+        """Run games in a loop, waiting `timer_seconds` between them."""
+        try:
+            while True:
+                await asyncio.sleep(self.timer_seconds)
+
+                async with self.queue_lock:
+                    if len(self.player_queue) < 2:
+                        self.logger.info("Очередь опустела, останавливаем таймер")
+                        break
+
+                    if self.is_processing:
+                        continue
+
+                    await self._process_single_game()
+
+        except asyncio.CancelledError:
+            self.logger.info("Queue timer cancelled")
+        except Exception as e:
+            self.logger.error(f"Queue timer error: {e}")
+
+    async def _process_single_game(self) -> None:
+        """Pop two players from the queue and start their game."""
+        try:
+            self.is_processing = True
+
+            player1_id, player1_name = self.player_queue.popleft()
+            player2_id, player2_name = self.player_queue.popleft()
+
+            self.last_game_time = asyncio.get_event_loop().time()
+
+            asyncio.create_task(self._start_game(player1_id, player1_name, player2_id, player2_name))
+
+            remaining_players = len(self.player_queue)
+            if remaining_players >= 1:
+                channel_name = self.bot.config["channels"][0]
+                channel = self.bot.get_channel(channel_name)
+                if channel:
+                    if remaining_players == 1:
+                        next_player_id, next_player_name = self.player_queue[0]
+                        await channel.send(f"@{next_player_name} ждет соперника для следующей игры! GAMBA")
+                    else:
+                        await channel.send(
+                            f"В очереди осталось {remaining_players} {pluralize(remaining_players, 'игрок')}. "
+                            f"Следующая игра через {self.timer_seconds} секунд!"
+                        )
+        except Exception as e:
+            self.logger.error(f"Error processing single game: {e}")
+        finally:
+            self.is_processing = False
+
+    async def _start_game(self, player1_id: str, player1_name: str, player2_id: str, player2_name: str) -> None:
+        """
+        Start a single game between two players.
+
+        Args:
+            player1_id: ID of the first player.
+            player1_name: Username of the first player.
+            player2_id: ID of the second player.
+            player2_name: Username of the second player.
+        """
+        try:
+            channel_name = self.bot.config["channels"][0]
+            channel = self.bot.get_channel(channel_name)
+
+            if not channel:
+                self.logger.error(f"Channel {channel_name} not found")
                 return
-
-            async with self.twenty_one_lock:
-                if (current_time - self.twenty_one_last_added > 360 and
-                        self.twenty_one_participants):
-                    self.twenty_one_participants.clear()
-                    self.logger.info("Автосброс участников очко")
-
-                if any(user[0] == ctx.author.id for user in self.twenty_one_participants):
-                    await ctx.send(f"@{ctx.author.name} вы уже в игре! Ждем соперника...")
-                    return
-
-                self.twenty_one_participants.append((str(ctx.author.id), ctx.author.name))
-                self.twenty_one_last_added = current_time
-                count = len(self.twenty_one_participants)
-                self.logger.info(f"{ctx.author.name} добавлен в очко. Всего: {count}")
-
-                if count < 2:
-                    await ctx.send(f"@{ctx.author.name} ждет соперника для игры в очко!")
-                    return
-
-                player1_id, player1_name = self.twenty_one_participants.pop(0)
-                player2_id, player2_name = self.twenty_one_participants.pop(0)
-                self.twenty_one_cooldown = current_time
 
             score1 = random.randint(16, 24)
             score2 = random.randint(16, 24)
 
             if score1 == score2:
-                await ctx.send(
+                await channel.send(
                     f"Джонни Додеп: Ничья! @{player1_name} и @{player2_name} "
                     f"сыграли вничью GAGAGA ({player1_name}: {score1} | {player2_name}: {score2})"
                 )
-                self.update_cooldown("twenty_one")
                 return
 
             winner_name, loser_name, winner_id, loser_id = self._determine_winner(
-                score1, score2,
-                (player1_id, player1_name),
-                (player2_id, player2_name)
+                score1, score2, (player1_id, player1_name), (player2_id, player2_name)
             )
 
-            await self._handle_game_result(ctx, winner_name, loser_name, winner_id, loser_id,
-                                           player1_name, player2_name, score1, score2)
-
-            self.update_cooldown("twenty_one")
+            await self._handle_game_result(
+                channel,
+                winner_name,
+                loser_name,
+                winner_id,
+                loser_id,
+                player1_name,
+                player2_name,
+                score1,
+                score2,
+            )
 
         except Exception as e:
-            self.logger.error(f"Ошибка в команде !очко: {e}")
-        finally:
-            execution_time = (time.time() - start_time) * 1000
-            if execution_time > 500:
-                self.logger.info(f"Время выполнения !очко: {execution_time:.2f}ms")
+            self.logger.error(f"Error starting game: {e}")
 
-    def _determine_winner(self, score1: int, score2: int, player1_data: tuple, player2_data: tuple) -> tuple:
+    @staticmethod
+    def _determine_winner(
+        score1: int,
+        score2: int,
+        player1_data: tuple[str, str],
+        player2_data: tuple[str, str],
+    ) -> tuple[str, str, str, str]:
         """
         Determine the winner based on scores and game rules.
 
@@ -125,73 +245,71 @@ class TwentyOneGame(BaseGame):
         if p1_valid and p2_valid:
             return (p1_name, p2_name, p1_id, p2_id) if score1 >= score2 else (p2_name, p1_name, p2_id, p1_id)
         elif p1_valid:
-            return (p1_name, p2_name, p1_id, p2_id)
+            return p1_name, p2_name, p1_id, p2_id
         elif p2_valid:
-            return (p2_name, p1_name, p2_id, p1_id)
+            return p2_name, p1_name, p2_id, p1_id
         else:
             return (p1_name, p2_name, p1_id, p2_id) if score1 <= score2 else (p2_name, p1_name, p2_id, p1_id)
 
-    async def _handle_game_result(self, ctx, winner_name: str, loser_name: str, winner_id: str, loser_id: str,
-                                  player1_name: str, player2_name: str, score1: int, score2: int) -> None:
+    async def _handle_game_result(
+        self,
+        channel: Any,
+        winner_name: str,
+        loser_name: str,
+        winner_id: str,
+        loser_id: str,
+        player1_name: str,
+        player2_name: str,
+        score1: int,
+        score2: int,
+    ) -> None:
         """
-        Process game result including statistics and timeout.
+        Handle the result of a game: update DB, send message, timeout loser.
 
         Args:
-            ctx: Command context
-            winner_name: Winner's display name
-            loser_name: Loser's display name
-            winner_id: Winner's user ID
-            loser_id: Loser's user ID
-            player1_name: First player's name
-            player2_name: Second player's name
-            score1: First player's score
-            score2: Second player's score
+            channel: The channel object to send messages.
+            winner_name: Winner’s username.
+            loser_name: Loser’s username.
+            winner_id: Winner’s user ID.
+            loser_id: Loser’s user ID.
+            player1_name: First player’s name.
+            player2_name: Second player’s name.
+            score1: First player’s score.
+            score2: Second player’s score.
         """
         if self.db:
             try:
-                previous_winner_wins, _ = await self.db.get_stats(winner_id)
-                previous_rank = self.RANKS.get_rank(previous_winner_wins)
+                previous_wins, _ = await self.db.get_stats(winner_id)
+                previous_rank = self.RANKS.get_rank(previous_wins)
 
-                winner_wins, winner_losses = await self.db.update_stats(winner_id, winner_name, win=True)
-                loser_wins, loser_losses = await self.db.update_stats(loser_id, loser_name, win=False)
+                winner_wins, _ = await self.db.update_stats(winner_id, winner_name, win=True)
+                await self.db.update_stats(loser_id, loser_name, win=False)
 
                 new_rank = self.RANKS.get_rank(winner_wins)
-
                 if new_rank != previous_rank:
-                    await ctx.send(
-                        f"🎉 @{winner_name} достиг нового ранга: {new_rank}! "
-                        f"Продолжайте играть, чтобы стать {self.RANKS.get_rank(winner_wins + 10)}! 🏆"
-                    )
+                    await channel.send(f"🎉 @{winner_name} достиг нового ранга: {new_rank}! 🏆")
 
-                self.logger.info(
-                    f"Статистика обновлена: {winner_name} ({winner_wins}/{winner_losses}) | "
-                    f"{loser_name} ({loser_wins}/{loser_losses})"
-                )
             except Exception as e:
                 self.logger.error(f"Ошибка сохранения статистики: {e}")
 
-        await ctx.send(
+        await channel.send(
             f"Джонни Додеп: @{winner_name} победил! "
-            f"Ааааааай мляяяяя NOOOO @{loser_name} ушел за додепом GAGAGA "
+            f"Ааааааай мляяяя NOOOO @{loser_name} ушел за додепом GAGAGA "
             f"({player1_name}: {score1} | {player2_name}: {score2})"
         )
 
-        loser_is_mod = any(
-            chatter.name.lower() == loser_name.lower() and is_privileged(chatter)
-            for chatter in ctx.channel.chatters
-        )
+        if loser_name.lower() not in PRIVILEGED_USERS_LOWER:
+            try:
+                await self.api.timeout_user(
+                    user_id=loser_id,
+                    channel_name=channel.name,
+                    duration=15,
+                    reason="очко",
+                )
+            except Exception as e:
+                self.logger.warning(f"Ошибка при таймауте: {e}")
 
-        if not loser_is_mod:
-            status, response = await self.api.timeout_user(
-                user_id=loser_id,
-                channel_name=ctx.channel.name,
-                duration=15,
-                reason="очко",
-            )
-            if status == 200:
-                self.logger.info(f"Таймаут 15s для {loser_name}")
-
-    async def handle_me_command(self, ctx) -> None:
+    async def handle_me_command(self, ctx: Context) -> None:
         """
         Handle player statistics command.
 
@@ -211,7 +329,7 @@ class TwentyOneGame(BaseGame):
             total = wins + losses
 
             if total == 0:
-                await ctx.send(f"@{ctx.author.name}, у вас еще нет сыгранных игр. Сыграйте первую игру!")
+                await ctx.send(f"@{ctx.author.name}, у вас еще нет сыгранных игр. Сыграйте первую игру! GAMBA")
                 return
 
             win_rate = (wins / total) * 100
@@ -231,6 +349,8 @@ class TwentyOneGame(BaseGame):
                 wins_needed = next_rank_wins - wins
                 victory_word = pluralize(wins_needed, "победа")
                 message += f"\n🔜 До следующего ранга: {wins_needed} {victory_word}"
+            else:
+                message += "\n🌟 Вы достигли максимального ранга! Вот же кому-то делать нехуй SubPricege"
 
             await ctx.send(message)
             self.update_cooldown("me")
@@ -239,7 +359,7 @@ class TwentyOneGame(BaseGame):
             self.logger.error(f"Ошибка команды 'я': {e}")
             await ctx.send("Произошла ошибка при получении статистики")
 
-    async def handle_leaders_command(self, ctx) -> None:
+    async def handle_leaders_command(self, ctx: Context) -> None:
         """
         Handle leaderboard display command.
 
@@ -262,11 +382,12 @@ class TwentyOneGame(BaseGame):
             medals = ["🥇", "🥈", "🥉"]
             message_lines = ["Главные очкошники: "]
 
-            for i, (username, wins, losses) in enumerate(top_players):
+            for i, (username, wins, _losses) in enumerate(top_players):
                 medal = medals[i] if i < len(medals) else "🏅"
+                rank = self.RANKS.get_rank(wins)
                 wins_word = pluralize(wins, "победа")
                 wins_str = f"{wins} {wins_word}"
-                message_lines.append(f"{medal} {username} ({wins_str})")
+                message_lines.append(f"{medal} {username} - {rank} ({wins_str})")
 
             await ctx.send("\n".join(message_lines))
             self.update_cooldown("leaders")
@@ -274,3 +395,12 @@ class TwentyOneGame(BaseGame):
         except Exception as e:
             self.logger.error(f"Ошибка команды 'лидеры': {e}")
             await ctx.send("Произошла ошибка при получении рейтинга")
+
+    async def close(self) -> None:
+        """Clean up resources when shutting down."""
+        if self.timer_task and not self.timer_task.done():
+            self.timer_task.cancel()
+            try:
+                await self.timer_task
+            except asyncio.CancelledError:
+                pass
