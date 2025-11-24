@@ -1,29 +1,8 @@
-from typing import Dict, Tuple
-from twitchio import Chatter
-
-from src.core.config_loader import load_settings
-
-PRIVILEGED_USERS = load_settings()["privileged"]
-
-
-def is_privileged(chatter: Chatter) -> bool:
-    """
-    Check if user has privileged status (moderator, broadcaster, or configured privileged user).
-
-    Args:
-        chatter: Twitch chatter object to check
-
-    Returns:
-        True if user has privileged status, False otherwise
-    """
-    return (chatter.is_mod or chatter.is_broadcaster) or chatter.name in PRIVILEGED_USERS
-
-
-def pluralize(count: int, word: str, case: str = 'nominative') -> str:
+def pluralize(count: int, word: str, case: str = "nominative") -> str:
     """
     Inflect Russian words based on count and grammatical case.
 
-    Supports: победа, поражение, секунда, минута, час.
+    Supports: победа, поражение, секунда, минута, час, игрок.
     Cases: 'nominative' (именительный), 'accusative' (винительный).
 
     Args:
@@ -34,26 +13,30 @@ def pluralize(count: int, word: str, case: str = 'nominative') -> str:
     Returns:
         Properly inflected word form based on count and case
     """
-    forms: Dict[str, Dict[str, Tuple[str, str, str]]] = {
+    forms: dict[str, dict[str, tuple[str, str, str]]] = {
         "победа": {
-            'nominative': ("победа", "победы", "побед"),
-            'accusative': ("победу", "победы", "побед")
+            "nominative": ("победа", "победы", "побед"),
+            "accusative": ("победу", "победы", "побед"),
         },
         "поражение": {
-            'nominative': ("поражение", "поражения", "поражений"),
-            'accusative': ("поражение", "поражения", "поражений")
+            "nominative": ("поражение", "поражения", "поражений"),
+            "accusative": ("поражение", "поражения", "поражений"),
         },
         "секунда": {
-            'nominative': ("секунда", "секунды", "секунд"),
-            'accusative': ("секунду", "секунды", "секунд")
+            "nominative": ("секунда", "секунды", "секунд"),
+            "accusative": ("секунду", "секунды", "секунд"),
         },
         "минута": {
-            'nominative': ("минута", "минуты", "минут"),
-            'accusative': ("минуту", "минуты", "минут")
+            "nominative": ("минута", "минуты", "минут"),
+            "accusative": ("минуту", "минуты", "минут"),
         },
         "час": {
-            'nominative': ("час", "часа", "часов"),
-            'accusative': ("час", "часа", "часов")
+            "nominative": ("час", "часа", "часов"),
+            "accusative": ("час", "часа", "часов"),
+        },
+        "игрок": {
+            "nominative": ("игрок", "игрока", "игроков"),
+            "accusative": ("игрока", "игрока", "игроков"),
         },
     }
 
