@@ -3,6 +3,8 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from twitchio.ext.commands import Context
+
     from src.commands.command_handler import CommandHandler
 
 
@@ -14,7 +16,7 @@ class BaseGame(ABC):
     and access to shared resources through the command handler.
     """
 
-    def __init__(self, command_handler: 'CommandHandler'):
+    def __init__(self, command_handler: "CommandHandler") -> None:
         self.command_handler = command_handler
         self.bot = command_handler.bot
         self.api = command_handler.api
@@ -24,7 +26,7 @@ class BaseGame(ABC):
         self.logger = logging.getLogger(__name__)
 
     @abstractmethod
-    async def handle_command(self, ctx) -> None:
+    async def handle_command(self, ctx: "Context") -> None:
         """
         Process game command.
 
@@ -53,6 +55,9 @@ class BaseGame(ABC):
         time_since_last = current_time - last_time
         can_execute = time_since_last >= delay_time
 
+        if not isinstance(can_execute, bool):
+            return False
+
         return can_execute
 
     def update_cooldown(self, command_name: str) -> None:
@@ -62,4 +67,5 @@ class BaseGame(ABC):
         Args:
             command_name: Name of the command to update
         """
-        self.cache_manager.command_cooldowns[command_name] = self.command_handler.get_current_time()
+        current_time = self.command_handler.get_current_time()
+        self.cache_manager.command_cooldowns[command_name] = int(current_time)
