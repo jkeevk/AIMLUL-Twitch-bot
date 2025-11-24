@@ -1,0 +1,16 @@
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+.env/
+.uv/
+.idea/
+.vscode/
+/data/
+data/
+*.log
+/docker-data/
+.cache/
