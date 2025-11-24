@@ -33,6 +33,7 @@ dependencies = [
     "black>=25.11.0",
     "types-requests>=2.32.4.20250913",
     "isort>=7.0.0",
+    "pre-commit>=4.5.0",
 ]
 
 
