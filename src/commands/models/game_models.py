@@ -1,7 +1,6 @@
-from dataclasses import dataclass
-from typing import List, Tuple, Dict, Optional
-import time
 import random
+import time
+from dataclasses import dataclass
 
 
 @dataclass
@@ -12,7 +11,7 @@ class GameRank:
     Maps win counts to rank names with automatic threshold detection.
     """
 
-    thresholds: Dict[int, str]
+    thresholds: dict[int, str]
 
     def get_rank(self, wins: int) -> str:
         """
@@ -63,8 +62,8 @@ class BaseCollector:
             config: Collector configuration parameters
         """
         self.config = config
-        self.participants: List[Tuple[str, str]] = []
-        self.last_added = 0
+        self.participants: list[tuple[str, str]] = []
+        self.last_added: float = 0.0
 
     def add(self, user_id: str, user_name: str) -> bool:
         """
@@ -82,6 +81,7 @@ class BaseCollector:
 
         self.participants.append((user_id, user_name))
         self.last_added = time.time()
+
         return True
 
     def reset(self) -> None:
@@ -106,7 +106,7 @@ class BaseCollector:
         """
         return len(self.participants) >= self.config.required_participants
 
-    def get_random(self) -> Optional[Tuple[str, str]]:
+    def get_random(self) -> tuple[str, str] | None:
         """
         Get random participant from collection.
 

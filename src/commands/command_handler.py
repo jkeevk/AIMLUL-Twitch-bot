@@ -2,11 +2,11 @@ import logging
 import time
 from typing import Any
 
+from src.commands.games.collectors_game import CollectorsGame
+from src.commands.games.simple_commands import SimpleCommandsGame
+from src.commands.games.twenty_one import TwentyOneGame
 from src.commands.managers.cache_manager import CacheManager
 from src.commands.managers.user_manager import UserManager
-from src.commands.games.collectors_game import CollectorsGame
-from src.commands.games.twenty_one import TwentyOneGame
-from src.commands.games.simple_commands import SimpleCommandsGame
 
 
 class CommandHandler:
@@ -36,7 +36,8 @@ class CommandHandler:
         self.twenty_one_game = TwentyOneGame(self)
         self.simple_commands_game = SimpleCommandsGame(self)
 
-    def get_current_time(self) -> float:
+    @staticmethod
+    def get_current_time() -> float:
         """
         Get current timestamp for consistent time operations.
 
@@ -46,11 +47,11 @@ class CommandHandler:
         return time.time()
 
     async def handle_gnome(self, message: Any) -> None:
-        """Handle gnome collector trigger in chat messages."""
+        """Handle gnome collector trigger."""
         await self.collectors_game.handle_gnome(message)
 
     async def handle_applecat(self, message: Any) -> None:
-        """Handle applecat collector trigger in chat messages."""
+        """Handle applecat collector trigger."""
         await self.collectors_game.handle_applecat(message)
 
     async def handle_club(self, ctx: Any) -> None:
@@ -62,7 +63,7 @@ class CommandHandler:
         await self.simple_commands_game.handle_butt_command(ctx)
 
     async def handle_barrel(self, ctx: Any) -> None:
-        """Handle test barrel command (admin functionality)."""
+        """Handle test barrel command."""
         await self.simple_commands_game.handle_test_barrel_command(ctx)
 
     async def handle_twenty_one(self, ctx: Any) -> None:

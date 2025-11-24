@@ -1,10 +1,10 @@
-import time
 import asyncio
-from typing import List, Dict, Tuple, Optional
-from collections import defaultdict
-from twitchio import PartialUser, Chatter
+import time
+from typing import Any
 
-from src.commands.helpers import is_privileged
+from twitchio import Chatter, PartialUser
+
+from src.commands.permissions import is_privileged
 
 
 class UserIDCache:
@@ -15,12 +15,19 @@ class UserIDCache:
     with automatic cleanup of expired entries.
     """
 
-    def __init__(self, max_size: int = 1000, ttl: int = 3600):
-        self._cache: Dict[str, Tuple[str, float]] = {}
-        self._max_size = max_size
-        self._ttl = ttl
+    def __init__(self, max_size: int = 1000, ttl: int = 3600) -> None:
+        """
+        Initialize the UserIDCache.
 
-    def get(self, username: str) -> Optional[str]:
+        Args:
+            max_size: Maximum number of entries in the cache.
+            ttl: Time-to-live for cache entries in seconds.
+        """
+        self._cache: dict[str, tuple[str, float]] = {}
+        self._max_size: int = max_size
+        self._ttl: int = ttl
+
+    def get(self, username: str) -> str | None:
         """
         Retrieve user ID from cache.
 
@@ -34,8 +41,7 @@ class UserIDCache:
             user_id, timestamp = self._cache[username]
             if time.time() - timestamp < self._ttl:
                 return user_id
-            else:
-                del self._cache[username]
+            del self._cache[username]
         return None
 
     def set(self, username: str, user_id: str) -> None:
@@ -67,16 +73,18 @@ class CacheManager:
     and cooldowns for commands and users.
     """
 
-    def __init__(self):
-        self._cached_chatters = []
-        self._last_cache_update = 0
-        self._cache_ttl = 300
-        self._cache_lock = asyncio.Lock()
-        self.user_id_cache = UserIDCache()
-        self._user_cooldowns = {}
-        self.command_cooldowns = defaultdict(int)
+    def __init__(self) -> None:
+        """Initialize the CacheManager."""
+        self._cached_chatters: list[Any] = []
+        self._last_cache_update: float = 0
+        self._cache_ttl: int = 300
+        self.bot_nick: str = ""
+        self._cache_lock: asyncio.Lock = asyncio.Lock()
+        self.user_id_cache: UserIDCache = UserIDCache()
+        self._user_cooldowns: dict[str, float] = {}
+        self.command_cooldowns: dict[str, int] = {}
 
-    def _is_valid_target(self, chatter) -> bool:
+    def _is_valid_target(self, chatter: Any) -> bool:
         """
         Check if user is valid target for timeout actions.
 
@@ -86,17 +94,15 @@ class CacheManager:
         Returns:
             True if user can be targeted, False otherwise
         """
-        if hasattr(chatter, 'name') and chatter.name.lower() == getattr(self, 'bot_nick', '').lower():
+        if hasattr(chatter, "name") and chatter.name.lower() == self.bot_nick.lower():
             return False
-
         if isinstance(chatter, PartialUser):
             return True
-        elif isinstance(chatter, Chatter):
+        if isinstance(chatter, Chatter):
             return not is_privileged(chatter)
-
         return False
 
-    def _filter_chatters(self, chatters) -> List:
+    def filter_chatters(self, chatters: list[Any]) -> list[Any]:
         """
         Filter chatters list to valid targets.
 
@@ -108,23 +114,24 @@ class CacheManager:
         """
         return [chatter for chatter in chatters if self._is_valid_target(chatter)]
 
-    async def _update_chatters_cache(self, channel, bot_nick: str) -> None:
+    async def update_chatters_cache(self, channel: Any, bot_nick: str) -> None:
         """
-        Update cached chatters list.
+        Update the cached list of chatters for a channel.
 
         Args:
-            channel: Twitch channel object
-            bot_nick: Bot's username for filtering
+            channel: Twitch channel object containing `.chatters`.
+            bot_nick: Bot's username to exclude from cache.
         """
         async with self._cache_lock:
             try:
                 self.bot_nick = bot_nick
-                self._cached_chatters = self._filter_chatters(channel.chatters)
+                self._cached_chatters = self.filter_chatters(channel.chatters)
                 self._last_cache_update = time.time()
             except Exception as e:
-                print(f"Cache update error: {e}")
+                logger = getattr(self, "logger", print)
+                logger(f"Cache update error: {e}")
 
-    def get_cached_chatters(self) -> List:
+    def get_cached_chatters(self) -> list[Any]:
         """
         Get cached chatters list.
 
@@ -140,8 +147,7 @@ class CacheManager:
         Returns:
             True if cache is empty or expired, False otherwise
         """
-        return (not self._cached_chatters or
-                time.time() - self._last_cache_update > self._cache_ttl)
+        return not self._cached_chatters or (time.time() - self._last_cache_update > self._cache_ttl)
 
     def update_user_cooldown(self, user_id: str) -> None:
         """
@@ -163,6 +169,5 @@ class CacheManager:
         Returns:
             True if user can participate, False if on cooldown
         """
-        if user_id in self._user_cooldowns:
-            return time.time() - self._user_cooldowns[user_id] >= cooldown
-        return True
+        last_time = self._user_cooldowns.get(user_id, 0)
+        return (time.time() - last_time) >= cooldown

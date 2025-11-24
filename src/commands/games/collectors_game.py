@@ -1,8 +1,11 @@
-from typing import Dict
+from typing import Any
+
+from twitchio import Message
+from twitchio.ext.commands import Context
 
 from src.commands.games.base_game import BaseGame
 from src.commands.models.game_models import BaseCollector, CollectorConfig
-from src.commands.helpers import is_privileged
+from src.commands.permissions import is_privileged
 
 
 class CollectorsGame(BaseGame):
@@ -13,29 +16,33 @@ class CollectorsGame(BaseGame):
     before triggering an action (gnome, applecat collectors).
     """
 
-    def __init__(self, command_handler):
+    def __init__(self, command_handler: Any) -> None:
         super().__init__(command_handler)
 
-        self.collectors: Dict[str, BaseCollector] = {
-            "gnome": BaseCollector(CollectorConfig(
-                name="gnome",
-                reset_time=300,
-                reason="гном",
-                timeout_message="@{target_name}, попался гном Angry 👉🚪",
-                duration=60,
-                required_participants=3
-            )),
-            "applecatpanik": BaseCollector(CollectorConfig(
-                name="applecatpanik",
-                reset_time=300,
-                reason="не бегать",
-                timeout_message="@{target_name}, не бегать! Applecatrunt",
-                duration=60,
-                required_participants=3
-            ))
+        self.collectors: dict[str, BaseCollector] = {
+            "gnome": BaseCollector(
+                CollectorConfig(
+                    name="gnome",
+                    reset_time=300,
+                    reason="гном",
+                    timeout_message="@{target_name}, попался гном Angry 👉🚪",
+                    duration=60,
+                    required_participants=3,
+                )
+            ),
+            "applecatpanik": BaseCollector(
+                CollectorConfig(
+                    name="applecatpanik",
+                    reset_time=300,
+                    reason="не бегать",
+                    timeout_message="@{target_name}, не бегать! Applecatrunt",
+                    duration=60,
+                    required_participants=3,
+                )
+            ),
         }
 
-    async def handle_gnome(self, message) -> None:
+    async def handle_gnome(self, message: Message) -> None:
         """
         Handle GNOME collector trigger.
 
@@ -44,7 +51,7 @@ class CollectorsGame(BaseGame):
         """
         await self._handle_collector(message, "gnome")
 
-    async def handle_applecat(self, message) -> None:
+    async def handle_applecat(self, message: Message) -> None:
         """
         Handle applecatPanik collector trigger.
 
@@ -53,7 +60,7 @@ class CollectorsGame(BaseGame):
         """
         await self._handle_collector(message, "applecatpanik")
 
-    async def _handle_collector(self, message, collector_type: str) -> None:
+    async def _handle_collector(self, message: Message, collector_type: str) -> None:
         """
         Process collector participation and trigger actions.
 
@@ -78,17 +85,19 @@ class CollectorsGame(BaseGame):
             if not collector.add(message.author.id, message.author.name):
                 return
 
-            self.logger.info(
-                f"{message.author.name} добавлен в {collector_type}. Всего: {len(collector.participants)}"
-            )
+            self.logger.info(f"{message.author.name} добавлен в {collector_type}. Всего: {len(collector.participants)}")
 
             if not collector.is_full():
                 return
 
-            target_id, target_name = collector.get_random()
-            self.logger.info(
-                f"Попытка таймаута {target_name} ({target_id}) из сбора {collector_type}"
-            )
+            random_target = collector.get_random()
+            if random_target is None:
+                self.logger.warning(f"{collector_type} не смог выбрать случайного участника")
+                return
+
+            target_id, target_name = random_target
+
+            self.logger.info(f"Попытка таймаута {target_name} ({target_id}) из сбора {collector_type}")
 
             status, response = await self.api.timeout_user(
                 user_id=target_id,
@@ -98,9 +107,7 @@ class CollectorsGame(BaseGame):
             )
 
             if status == 200:
-                await message.channel.send(
-                    collector.config.timeout_message.format(target_name=target_name)
-                )
+                await message.channel.send(collector.config.timeout_message.format(target_name=target_name))
             elif status == 401:
                 self.logger.error("Неавторизован - требуется обновление токена")
             elif status == 429:
@@ -113,7 +120,7 @@ class CollectorsGame(BaseGame):
         except Exception as e:
             self.logger.error(f"Ошибка обработки {collector_type}: {e}")
 
-    async def handle_command(self, ctx) -> None:
+    async def handle_command(self, ctx: Context) -> None:
         """
         Not used for collectors (handled via message triggers).
 

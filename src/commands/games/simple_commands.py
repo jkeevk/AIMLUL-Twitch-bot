@@ -1,22 +1,24 @@
+import asyncio
 import random
 import time
-import asyncio
+
+from twitchio.ext.commands import Context
 
 from src.commands.games.base_game import BaseGame
-from src.commands.helpers import format_duration, is_privileged
+from src.commands.permissions import is_privileged
+from src.commands.text_inflect import format_duration
 
 
 class SimpleCommandsGame(BaseGame):
     """Handles simple chat commands like club, butt, and test barrel."""
 
-    async def handle_club_command(self, ctx) -> None:
+    async def handle_club_command(self, ctx: Context) -> None:
         """
         Handle the club command for moderators.
 
         Args:
             ctx: Command context object
         """
-        start_time = time.time()
         try:
             if not is_privileged(ctx.author):
                 self.logger.warning("Access denied: insufficient privileges")
@@ -26,11 +28,9 @@ class SimpleCommandsGame(BaseGame):
                 return
 
             if self.cache_manager.should_update_cache():
-                asyncio.create_task(
-                    self.cache_manager._update_chatters_cache(ctx.channel, self.bot.nick)
-                )
+                asyncio.create_task(self.cache_manager.update_chatters_cache(ctx.channel, self.bot.nick))
                 if not self.cache_manager.get_cached_chatters():
-                    await self.cache_manager._update_chatters_cache(ctx.channel, self.bot.nick)
+                    await self.cache_manager.update_chatters_cache(ctx.channel, self.bot.nick)
 
             cached_chatters = self.cache_manager.get_cached_chatters()
             if not cached_chatters:
@@ -59,23 +59,20 @@ class SimpleCommandsGame(BaseGame):
             if status == 200:
                 self.update_cooldown("club")
                 self.logger.info(f"Club applied to {target_chatter.name}")
-                asyncio.create_task(
-                    self.cache_manager._update_chatters_cache(ctx.channel, self.bot.nick)
-                )
+                asyncio.create_task(self.cache_manager.update_chatters_cache(ctx.channel, self.bot.nick))
             else:
                 self.logger.warning(f"Timeout failed: {status}")
 
         except Exception as e:
             self.logger.error(f"Club command error: {e}")
 
-    async def handle_butt_command(self, ctx) -> None:
+    async def handle_butt_command(self, ctx: Context) -> None:
         """
         Handle the butt command with random chance mechanics.
 
         Args:
             ctx: Command context object
         """
-        start_time = time.time()
         try:
             if not self.check_cooldown("butt"):
                 return
@@ -94,13 +91,13 @@ class SimpleCommandsGame(BaseGame):
             message = (
                 f"Жопа @{ctx.author.name} воняет на все 100% xdding 👑 Амбассадор вони! "
                 f"Отправлен в мойку на {format_duration(duration)} washing"
-                if random_chance == 100 else
-                f"Жопа @{ctx.author.name} воняет на {random_chance}% xdding "
+                if random_chance == 100
+                else f"Жопа @{ctx.author.name} воняет на {random_chance}% xdding "
                 f"Отправлен в мойку на {format_duration(duration)} washing"
             )
 
             if privileged:
-                await ctx.send(message + " ТАКИЕ ТВОИ МОДЕРЫ ХУЕГЛОТАЛКИ GAGAGA")
+                await ctx.send(message + " Шучу, не отправлен калик)")
                 self.logger.info(f"Moderator avoided punishment: {ctx.author.name}")
                 self.update_cooldown("butt")
             else:
@@ -125,7 +122,7 @@ class SimpleCommandsGame(BaseGame):
         except Exception as e:
             self.logger.error(f"Butt command error: {e}")
 
-    async def handle_test_barrel_command(self, ctx) -> None:
+    async def handle_test_barrel_command(self, ctx: Context) -> None:
         """
         Handle test barrel command for administrators.
 
@@ -141,7 +138,7 @@ class SimpleCommandsGame(BaseGame):
             if not self.check_cooldown("test_barrel"):
                 return
 
-            valid_chatters = self.cache_manager._filter_chatters(ctx.channel.chatters)
+            valid_chatters = self.cache_manager.filter_chatters(ctx.channel.chatters)
             if not valid_chatters:
                 self.logger.warning("No suitable users for barrel command")
                 return
@@ -158,7 +155,7 @@ class SimpleCommandsGame(BaseGame):
                             user_id=target_id,
                             channel_name=ctx.channel.name,
                             duration=15,
-                            reason="Тестовая бочка"
+                            reason="Тестовая бочка",
                         )
                     )
 
@@ -174,9 +171,12 @@ class SimpleCommandsGame(BaseGame):
                     self.logger.error(f"Error processing {targets[i].name}: {result}")
                     continue
 
-                status, response = result
-                if status == 200:
-                    punished_users.append(targets[i].name)
+                if isinstance(result, tuple) and len(result) == 2:
+                    status, response = result
+                    if status == 200:
+                        punished_users.append(targets[i].name)
+                else:
+                    self.logger.warning(f"Unexpected result type for {targets[i].name}: {type(result)}")
 
             if punished_users:
                 names_list = ", ".join(f"@{name}" for name in punished_users)
@@ -195,6 +195,6 @@ class SimpleCommandsGame(BaseGame):
             if execution_time > 500:
                 self.logger.info(f"Test barrel execution time: {execution_time:.2f}ms")
 
-    async def handle_command(self, ctx) -> None:
+    async def handle_command(self, ctx: Context) -> None:
         """Not used for simple commands."""
         pass

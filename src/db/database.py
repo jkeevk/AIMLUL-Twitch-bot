@@ -1,9 +1,11 @@
 import logging
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import List, Optional, Tuple
-from sqlalchemy import select, desc, func
+
+from sqlalchemy import desc, func, select
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
 from .models import Base, PlayerStats
 
 logger = logging.getLogger(__name__)
@@ -20,13 +22,11 @@ class Database:
             dsn: Database connection string
         """
         self.engine = create_async_engine(dsn, echo=False, future=True)
-        self.async_session = async_sessionmaker(
-            self.engine, expire_on_commit=False, class_=AsyncSession
-        )
+        self.async_session = async_sessionmaker(self.engine, expire_on_commit=False, class_=AsyncSession)
         logger.info("Database engine initialized")
 
     async def connect(self) -> None:
-        """Connect to database and create tables if they don't exist."""
+        """Connect to a database and create tables if they don't exist."""
         try:
             async with self.engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
@@ -44,7 +44,7 @@ class Database:
             logger.error(f"Error closing database: {e}")
 
     @asynccontextmanager
-    async def session_scope(self) -> AsyncSession:
+    async def session_scope(self) -> AsyncGenerator[AsyncSession]:
         """
         Provide a transactional scope around a series of operations.
 
@@ -63,7 +63,7 @@ class Database:
                 logger.error(f"Database transaction error: {e}")
                 raise
 
-    async def update_stats(self, twitch_id: str, username: str, win: bool) -> Tuple[int, int]:
+    async def update_stats(self, twitch_id: str, username: str, win: bool) -> tuple[int, int]:
         """
         Update player statistics with win/loss.
 
@@ -77,9 +77,7 @@ class Database:
         """
         try:
             async with self.session_scope() as session:
-                result = await session.execute(
-                    select(PlayerStats).where(PlayerStats.twitch_id == twitch_id)
-                )
+                result = await session.execute(select(PlayerStats).where(PlayerStats.twitch_id == twitch_id))
                 player = result.scalars().first()
 
                 if player:
@@ -87,9 +85,7 @@ class Database:
                         player.wins += 1
                     else:
                         player.losses += 1
-                    logger.info(
-                        f"Updated stats for {username}: {'win' if win else 'loss'}"
-                    )
+                    logger.info(f"Updated stats for {username}: {'win' if win else 'loss'}")
                 else:
                     player = PlayerStats(
                         twitch_id=twitch_id,
@@ -107,7 +103,7 @@ class Database:
             logger.error(f"Update stats error: {e}", exc_info=True)
             return 0, 0
 
-    async def get_stats(self, twitch_id: str) -> Tuple[int, int]:
+    async def get_stats(self, twitch_id: str) -> tuple[int, int]:
         """
         Retrieve player statistics.
 
@@ -119,9 +115,7 @@ class Database:
         """
         try:
             async with self.session_scope() as session:
-                result = await session.execute(
-                    select(PlayerStats).where(PlayerStats.twitch_id == twitch_id)
-                )
+                result = await session.execute(select(PlayerStats).where(PlayerStats.twitch_id == twitch_id))
                 player = result.scalars().first()
 
                 if player:
@@ -132,7 +126,7 @@ class Database:
             logger.error(f"Get stats error: {e}")
             return 0, 0
 
-    async def get_top_players(self, limit: int = 3) -> List[Tuple[str, int, int]]:
+    async def get_top_players(self, limit: int = 3) -> list[tuple[str, int, int]]:
         """
         Retrieve top players by win count.
 
@@ -148,16 +142,13 @@ class Database:
                 result = await session.execute(stmt)
                 top_players = result.scalars().all()
 
-                return [
-                    (player.username, player.wins, player.losses)
-                    for player in top_players
-                ]
+                return [(player.username, player.wins, player.losses) for player in top_players]
 
         except SQLAlchemyError as e:
             logger.error(f"Get top players error: {e}")
             return []
 
-    async def get_player_rank(self, twitch_id: str) -> Optional[int]:
+    async def get_player_rank(self, twitch_id: str) -> int | None:
         """
         Get player's rank position based on wins.
 
@@ -172,16 +163,11 @@ class Database:
                 subquery = (
                     select(
                         PlayerStats.twitch_id,
-                        func.rank()
-                        .over(order_by=desc(PlayerStats.wins))
-                        .label("position"),
+                        func.rank().over(order_by=desc(PlayerStats.wins)).label("position"),
                     )
                 ).subquery()
 
-                stmt = select(subquery.c.position).where(
-                    subquery.c.twitch_id == twitch_id
-                )
-
+                stmt = select(subquery.c.position).where(subquery.c.twitch_id == twitch_id)
                 result = await session.execute(stmt)
                 rank = result.scalar()
 

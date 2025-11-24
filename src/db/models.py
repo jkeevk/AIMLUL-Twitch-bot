@@ -1,44 +1,50 @@
-from typing import Optional
-from sqlalchemy import Column, Integer, String, DateTime, func
-from sqlalchemy.orm import declarative_base
+from datetime import datetime
 
-Base = declarative_base()
+from sqlalchemy import DateTime, Integer, String, func
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+
+class Base(DeclarativeBase):
+    """Base class for all SQLAlchemy ORM models."""
+
+    pass
 
 
 class PlayerStats(Base):
     """
-    Database model for storing player statistics in Twitch bot.
+    Represents player statistics in the database.
 
-    Tracks wins, losses, and provides calculated metrics like win rate.
-    Includes timestamps for creation and last update.
+    Attributes:
+        id (int): Primary key.
+        twitch_id (str): Unique Twitch ID of the player.
+        username (str): Player's username.
+        wins (int): Number of wins.
+        losses (int): Number of losses.
+        created_at (datetime): Record creation timestamp.
+        updated_at (datetime): Record last update timestamp.
     """
 
     __tablename__ = "player_stats"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    twitch_id = Column(String(255), unique=True, nullable=False, index=True)
-    username = Column(String(255), nullable=False, index=True)
-    wins = Column(Integer, default=0, nullable=False)
-    losses = Column(Integer, default=0, nullable=False)
-    created_at = Column(DateTime, default=func.now(), nullable=False)
-    updated_at = Column(
-        DateTime,
-        default=func.now(),
-        onupdate=func.now(),
-        nullable=False
-    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    twitch_id: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    username: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    wins: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    losses: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
 
     def win_rate(self) -> float:
         """
-        Calculate player's win rate percentage.
+        Calculate the player's win rate as a percentage.
 
         Returns:
-            Win rate as percentage (0.0 to 100.0), returns 0.0 if no games played
+            float: Win rate percentage (0.0 if no games played).
         """
-        total_games = self.wins + self.losses
+        total_games: int = self.wins + self.losses
         if total_games == 0:
             return 0.0
-        return (self.wins / total_games) * 100
+        return (self.wins / total_games) * 100.0
 
     def __repr__(self) -> str:
         """
