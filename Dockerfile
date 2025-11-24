@@ -21,8 +21,7 @@ COPY uv.lock pyproject.toml ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
 
-COPY src/ /app/src/
-COPY settings.ini /app/
+COPY . .
 
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
