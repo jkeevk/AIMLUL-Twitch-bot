@@ -3,7 +3,7 @@ import pathlib
 from typing import Any
 
 
-def load_settings(config_path: str = "settings.ini") -> dict[str, Any]:
+def load_settings(config_path: str | None = None) -> dict[str, Any]:
     """
     Load bot configuration settings from INI file.
 
@@ -11,14 +11,34 @@ def load_settings(config_path: str = "settings.ini") -> dict[str, Any]:
     parsed settings with appropriate data types.
 
     Args:
-        config_path: Path to the configuration file
+        config_path: Path to the configuration file (None for auto-detection)
 
     Returns:
         Dictionary containing all bot settings with proper typing
     """
     config = configparser.ConfigParser()
 
-    if not pathlib.Path(config_path).exists():
+    final_config_path: str
+
+    if config_path is None:
+        possible_paths = [
+            "settings.ini",
+            "/app/settings.ini",
+            str(pathlib.Path(__file__).parent.parent.parent / "settings.ini"),
+        ]
+
+        for path in possible_paths:
+            if pathlib.Path(path).exists():
+                final_config_path = path
+                break
+        else:
+            final_config_path = "settings.ini"
+    else:
+        final_config_path = config_path
+
+    config_path_obj = pathlib.Path(final_config_path)
+
+    if not config_path_obj.exists():
         config["SETTINGS"] = {
             "command_delay_time": "45",
             "refresh_token_delay_time": "7200",
@@ -26,10 +46,13 @@ def load_settings(config_path: str = "settings.ini") -> dict[str, Any]:
         config["INITIAL_CHANNELS"] = {"channels": ""}
         config["DATABASE"] = {"dsn": "postgresql+asyncpg://bot:botpassword@db/twitch_bot"}
         config["ADMINS"] = {"admins": "", "privileged": ""}
-        with pathlib.Path(config_path).open("w") as configfile:
+
+        config_path_obj.parent.mkdir(parents=True, exist_ok=True)
+
+        with config_path_obj.open("w") as configfile:
             config.write(configfile)
 
-    config.read(config_path)
+    config.read(final_config_path)
 
     settings = {
         "command_delay_time": int(config.get("SETTINGS", "command_delay_time", fallback=45)),
