@@ -1,6 +1,8 @@
 services:
   twitch-bot:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: twitch-bot
     restart: unless-stopped
     depends_on:
@@ -17,6 +19,8 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    networks:
+      - webnet
 
   db:
     image: postgres:17
@@ -36,5 +40,88 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
+    networks:
+      - webnet
+
+  admin:
+    build:
+      context: ./admin
+      dockerfile: Dockerfile
+    container_name: admin
+    ports:
+      - "8080:8080"
+    environment:
+      # Authentication
+      AUTH_USERNAME: ${AUTH_USERNAME:-admin}
+      AUTH_PASSWORD: ${AUTH_PASSWORD:-password}
+      PASSWORD_ATTEMPTS_LIMIT: ${PASSWORD_ATTEMPTS_LIMIT:-5}
+      SESSION_TIMEOUT_MINUTES: ${SESSION_TIMEOUT_MINUTES:-30}
+      
+      # SSH defaults
+      DEFAULT_SSH_HOST: ${DEFAULT_SSH_HOST:-localhost}
+      DEFAULT_SSH_USERNAME: ${DEFAULT_SSH_USERNAME:-root}
+      DEFAULT_SSH_PASSWORD: ${DEFAULT_SSH_PASSWORD:-}
+      SSH_POOL_MAX_CONNECTIONS: ${SSH_POOL_MAX_CONNECTIONS:-5}
+      SSH_POOL_TIMEOUT: ${SSH_POOL_TIMEOUT:-300}
+      
+      # Docker
+      DEFAULT_CONTAINER: ${DEFAULT_CONTAINER:-twitch-bot}
+      
+      # JWT Security
+      SECRET_KEY: ${SECRET_KEY:-SUPER_SECRET_KEY_CHANGE_ME}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      
+      # Logging
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    
+    volumes:
+      - ./admin/app/templates:/app/templates
+      - ./admin/app/static:/app/static
+      - ./admin/app/:/app
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+    restart: unless-stopped
+    networks:
+      - webnet
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./admin/nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./admin/app:/app
+      - ./admin/nginx/entrypoint.sh:/etc/nginx/entrypoint.sh:ro
+    
+    environment:
+      NGINX_ENV: production
+    
+    entrypoint: ["/bin/sh", "/etc/nginx/entrypoint.sh"]
+    
+    depends_on:
+      admin:
+        condition: service_healthy
+    
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    
+    restart: unless-stopped
+    networks:
+      - webnet
+
+networks:
+  webnet:
+    driver: bridge
+
 volumes:
   data:

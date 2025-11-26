@@ -1,0 +1,372 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-10">
+        <!-- SSH Connection Form -->
+        <div class="card fade-in">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h4 class="mb-0"><i class="fas fa-terminal me-2"></i>SSH Connection</h4>
+                <button class="btn btn-outline-info btn-sm" id="quickFillBtn">
+                    <i class="fas fa-bolt me-1"></i>Quick Fill
+                </button>
+            </div>
+            <div class="card-body">
+                <form method="post" action="/logs" id="logsForm">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label for="ip" class="form-label">
+                                Host IP
+                                <i class="fas fa-question-circle text-muted ms-1"
+                                   title="Server IP address for SSH connection"></i>
+                            </label>
+                            <input type="text" class="form-control" id="ip" name="ip"
+                                   value="{{ default_host or '' }}" required
+                                   placeholder="192.168.1.100">
+                        </div>
+                        <div class="col-md-6">
+                            <label for="username" class="form-label">Username</label>
+                            <input type="text" class="form-control" id="username" name="username"
+                                   value="{{ default_username or '' }}" required
+                                   placeholder="root">
+                        </div>
+                        <div class="col-md-6">
+                            <label for="password" class="form-label">
+                                Password
+                            </label>
+                            <div class="input-group">
+                                <input type="password" class="form-control" id="password" name="password"
+                                       placeholder="{% if has_default_password %}Leave empty for default password{% else %}SSH password{% endif %}">
+                                <button type="button" class="btn btn-outline-secondary" id="togglePassword">
+                                    <i class="fas fa-eye"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="container" class="form-label">Container Name/ID</label>
+                            <input type="text" class="form-control" id="container" name="container"
+                                   value="{{ default_container or '' }}" required
+                                   placeholder="my-container">
+                        </div>
+                        <div class="col-md-12">
+                            <label for="lines" class="form-label">Number of Lines</label>
+                            <input type="number" class="form-control" id="lines" name="lines" value="100" min="1" max="5000">
+                        </div>
+                    </div>
+
+                    <div class="mt-4 d-flex flex-wrap gap-2">
+                        <button type="submit" class="btn btn-primary" id="getLogsBtn">
+                            <i class="fas fa-download me-1"></i>Get Logs
+                        </button>
+                        <button type="button" class="btn btn-success" id="streamBtn">
+                            <i class="fas fa-play me-1"></i>Start Streaming
+                        </button>
+                        <button type="button" class="btn btn-danger" id="stopBtn" disabled>
+                            <i class="fas fa-stop me-1"></i>Stop Streaming
+                        </button>
+                        <button type="button" class="btn btn-outline-warning" id="clearFormBtn">
+                            <i class="fas fa-broom me-1"></i>Clear
+                        </button>
+                        <div class="ms-auto">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="autoScroll" checked>
+                                <label class="form-check-label" for="autoScroll">Auto Scroll</label>
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Container Management Section -->
+        <div class="card mt-4 fade-in">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="fas fa-cogs me-2"></i>Container Management</h5>
+            </div>
+            <div class="card-body">
+                <div class="row g-2">
+                    {% for container_name in ['twitch-bot', 'twitch-db'] %}
+                    <div class="col-md-6">
+                        <div class="card h-100">
+                            <div class="card-body">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <h6 class="card-title mb-0">{{ container_name.replace('-', ' ').title() }}</h6>
+                                    <span class="badge bg-secondary container-status" id="status-{{ container_name }}">
+                                        <i class="fas fa-question-circle me-1"></i>Unknown
+                                    </span>
+                                </div>
+                                <div class="d-flex gap-2 w-100">
+                                    <button type="button" class="btn btn-outline-success btn-sm flex-grow-1" onclick="containerAction('{{ container_name }}', 'start')">
+                                        <i class="fas fa-play me-1"></i>Start
+                                    </button>
+                                    <button type="button" class="btn btn-outline-danger btn-sm flex-grow-1" onclick="containerAction('{{ container_name }}', 'stop')">
+                                        <i class="fas fa-stop me-1"></i>Stop
+                                    </button>
+                                    <button type="button" class="btn btn-outline-warning btn-sm flex-grow-1" onclick="containerAction('{{ container_name }}', 'restart')">
+                                        <i class="fas fa-redo me-1"></i>Restart
+                                    </button>
+                                    <button type="button" class="btn btn-outline-info btn-sm flex-grow-1" onclick="containerAction('{{ container_name }}', 'status')">
+                                        <i class="fas fa-info me-1"></i>Status
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                <div class="mt-3" id="containerResult"></div>
+            </div>
+        </div>
+
+        <!-- Live Logs -->
+        <div class="card mt-4 d-none fade-in" id="streamCard">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">
+                    <i class="fas fa-stream me-2"></i>Live Logs Stream
+                    <small class="text-muted ms-2" id="currentContainer"></small>
+                </h5>
+                <div class="d-flex align-items-center">
+                    <span class="connection-status status-disconnected me-2" id="connectionStatus">
+                        <i class="fas fa-circle me-1"></i>Disconnected
+                    </span>
+                    <div class="btn-group">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="clearLogsBtn">
+                            <i class="fas fa-eraser me-1"></i>Clear
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="copyLogsBtn">
+                            <i class="fas fa-copy me-1"></i>Copy
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="card-body p-0">
+                <div class="log-container" id="liveLogs"></div>
+            </div>
+        </div>
+
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const streamBtn = document.getElementById('streamBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const streamCard = document.getElementById('streamCard');
+    const liveLogs = document.getElementById('liveLogs');
+    const connectionStatus = document.getElementById('connectionStatus');
+    const currentContainer = document.getElementById('currentContainer');
+    const autoScrollCheckbox = document.getElementById('autoScroll');
+    let websocket = null;
+
+    // Toggle password visibility
+    document.getElementById('togglePassword').addEventListener('click', function() {
+        const passwordInput = document.getElementById('password');
+        const type = passwordInput.getAttribute('type') === 'password' ? 'text' : 'password';
+        passwordInput.setAttribute('type', type);
+        this.innerHTML = type === 'password' ? '<i class="fas fa-eye"></i>' : '<i class="fas fa-eye-slash"></i>';
+    });
+
+    // Quick fill button
+    document.getElementById('quickFillBtn').addEventListener('click', function() {
+        document.getElementById('ip').value = '{{ default_host or "" }}';
+        document.getElementById('username').value = '{{ default_username or "" }}';
+        document.getElementById('container').value = '{{ default_container or "" }}';
+        document.getElementById('password').value = '';
+
+        showNotification('Form filled with default values', 'success');
+    });
+
+    // Clear form button
+    document.getElementById('clearFormBtn').addEventListener('click', function() {
+        document.getElementById('logsForm').reset();
+        showNotification('Form cleared', 'info');
+    });
+
+    // Clear logs button
+    document.getElementById('clearLogsBtn').addEventListener('click', function() {
+        liveLogs.innerHTML = '';
+        showNotification('Logs cleared', 'info');
+    });
+
+    // Copy logs button
+    document.getElementById('copyLogsBtn').addEventListener('click', function() {
+        navigator.clipboard.writeText(liveLogs.textContent).then(() => {
+            showNotification('Logs copied to clipboard', 'success');
+        });
+    });
+
+    // Auto-scroll functionality
+    function scrollToBottom() {
+        if (autoScrollCheckbox.checked) {
+            liveLogs.scrollTop = liveLogs.scrollHeight;
+        }
+    }
+
+    // Notification system
+    function showNotification(message, type = 'info') {
+        // Remove old notifications
+        document.querySelectorAll('.alert.position-fixed').forEach(alert => {
+            alert.remove();
+        });
+
+        const alert = document.createElement('div');
+        alert.className = `alert alert-${type} alert-dismissible fade show position-fixed`;
+        alert.style.cssText = 'top: 20px; right: 20px; z-index: 1050; min-width: 300px;';
+        alert.innerHTML = `
+            ${message}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        `;
+        document.body.appendChild(alert);
+
+        setTimeout(() => {
+            if (alert.parentNode) {
+                alert.remove();
+            }
+        }, 5000);
+    }
+
+    // Check container status on load
+    function checkContainerStatus() {
+        ['twitch-bot', 'twitch-db'].forEach(container => {
+            setTimeout(() => {
+                containerAction(container, 'status', true);
+            }, 1000);
+        });
+    }
+
+    // Streaming functionality
+    streamBtn.addEventListener('click', function() {
+        const formData = {
+            ip: document.getElementById('ip').value,
+            username: document.getElementById('username').value,
+            password: document.getElementById('password').value,
+            container: document.getElementById('container').value
+        };
+
+        if (!formData.ip || !formData.username || !formData.container) {
+            showNotification('Please fill all required fields', 'warning');
+            return;
+        }
+
+        startStreaming(formData);
+    });
+
+    stopBtn.addEventListener('click', function() {
+        stopStreaming();
+    });
+
+    function startStreaming(formData) {
+        try {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws/logs`;
+            websocket = new WebSocket(wsUrl);
+
+            websocket.onopen = function() {
+                streamCard.classList.remove('d-none');
+                connectionStatus.className = 'connection-status status-connected';
+                connectionStatus.innerHTML = '<i class="fas fa-circle me-1"></i>Connected';
+                currentContainer.textContent = `- ${formData.container}`;
+                liveLogs.innerHTML = '';
+                streamBtn.disabled = true;
+                stopBtn.disabled = false;
+                websocket.send(JSON.stringify(formData));
+                showNotification(`Started streaming logs for ${formData.container}`, 'success');
+            };
+
+            websocket.onmessage = function(event) {
+                liveLogs.innerHTML += event.data;
+                scrollToBottom();
+            };
+
+            websocket.onclose = function() {
+                connectionStatus.className = 'connection-status status-disconnected';
+                connectionStatus.innerHTML = '<i class="fas fa-circle me-1"></i>Disconnected';
+                streamBtn.disabled = false;
+                stopBtn.disabled = true;
+                showNotification('Stream disconnected', 'info');
+            };
+
+            websocket.onerror = function(error) {
+                showNotification('WebSocket connection error', 'danger');
+                console.error('WebSocket error:', error);
+            };
+
+        } catch (error) {
+            showNotification('Error starting stream: ' + error.message, 'danger');
+        }
+    }
+
+    function stopStreaming() {
+        if (websocket) {
+            websocket.close();
+            websocket = null;
+        }
+        streamCard.classList.add('d-none');
+        streamBtn.disabled = false;
+        stopBtn.disabled = true;
+    }
+
+    // Initialize
+    checkContainerStatus();
+});
+
+// Container actions with loading states
+async function containerAction(containerName, action, silent = false) {
+    const formData = new FormData();
+    ['ip','username','password','container'].forEach(f => formData.append(f, document.getElementById(f).value));
+    formData.set('container', containerName);
+    formData.set('action', action);
+
+    const resultDiv = document.getElementById('containerResult');
+    const statusBadge = document.getElementById(`status-${containerName}`);
+
+    if (!silent) {
+        resultDiv.innerHTML = `<div class="alert alert-info">Executing ${action} on ${containerName}...</div>`;
+    }
+
+    // Show loading state on buttons
+    const buttons = document.querySelectorAll(`button[onclick*="${containerName}"]`);
+    buttons.forEach(btn => btn.classList.add('btn-loading'));
+
+    try {
+        const response = await fetch('/container/action', { method: 'POST', body: formData });
+        const data = await response.json();
+
+        if (data.status === 'success') {
+            if (!silent) {
+                resultDiv.innerHTML = `<div class="alert alert-success"><strong>Success:</strong> ${action} executed on ${containerName}<pre class="mt-2 mb-0">${data.result}</pre></div>`;
+            }
+
+            // Update status badge
+            if (action === 'status') {
+                const isRunning = data.result.toLowerCase().includes('up');
+                statusBadge.className = `badge ${isRunning ? 'bg-success' : 'bg-danger'}`;
+                statusBadge.innerHTML = `<i class="fas ${isRunning ? 'fa-play' : 'fa-stop'} me-1"></i>${isRunning ? 'Running' : 'Stopped'}`;
+            }
+
+            if (['start', 'stop', 'restart'].includes(action)) {
+                // Refresh status after action
+                setTimeout(() => containerAction(containerName, 'status', true), 1000);
+            }
+
+        } else {
+            if (!silent) {
+                resultDiv.innerHTML = `<div class="alert alert-danger"><strong>Error:</strong> ${data.result}</div>`;
+            }
+            statusBadge.className = 'badge bg-warning';
+            statusBadge.innerHTML = '<i class="fas fa-exclamation-triangle me-1"></i>Error';
+        }
+    } catch (error) {
+        if (!silent) {
+            resultDiv.innerHTML = `<div class="alert alert-danger"><strong>Request Error:</strong> ${error}</div>`;
+        }
+    } finally {
+        // Remove loading state
+        const buttons = document.querySelectorAll(`button[onclick*="${containerName}"]`);
+        buttons.forEach(btn => btn.classList.remove('btn-loading'));
+    }
+}
+</script>
+{% endblock %}

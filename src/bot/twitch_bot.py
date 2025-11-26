@@ -19,7 +19,6 @@ from src.eventsub.manager import EventSubManager
 from src.utils.token_manager import TokenManager
 
 logger = logging.getLogger(__name__)
-CONFIG_PATH = "/app/settings.ini"
 
 
 class TwitchBot(commands.Bot):  # type: ignore[misc]
@@ -43,7 +42,7 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
             token_manager: Manager for handling token refresh operations
             bot_token: Bot authentication token
         """
-        self.config = load_settings(CONFIG_PATH)
+        self.config = load_settings()
         self.token_manager = token_manager
         self.active = True
 
@@ -74,6 +73,7 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
         """
         try:
             token = await self.token_manager.get_streamer_token()
+            logger.info("Streamer token for EventSub updated")
             return token
         except Exception as e:
             logger.error(f"Failed to refresh streamer token for EventSub: {e}")
@@ -86,7 +86,6 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
         if self.db:
             try:
                 await self.db.connect()
-                logger.info("DB OK")
             except Exception as e:
                 logger.error("DB connection failed", exc_info=e)
                 self.db = None
