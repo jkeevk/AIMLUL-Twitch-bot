@@ -20,7 +20,7 @@ class EventSubManager:
 
     def __init__(self, bot: "TwitchBot") -> None:
         """
-        Initialize the EventSub manager.
+        Initialize EventSub manager.
 
         Args:
             bot: TwitchBot instance.
@@ -52,9 +52,39 @@ class EventSubManager:
             broadcaster_id = users[0].id
 
             try:
-                await self.client.subscribe_channel_points_redeemed(broadcaster_id, streamer_token)
+                await self.client.subscribe_channel_points_redeemed(
+                    broadcaster_id,
+                    streamer_token,
+                )
                 logger.info("EventSub started successfully (channel points)")
             except Unauthorized:
                 logger.warning("Streamer is not Affiliate/Partner — channel points EventSub disabled.")
+
         except Exception as e:
             logger.error(f"EventSub setup failed: {e}", exc_info=True)
+
+    async def close(self) -> None:
+        """
+        Close the EventSub WebSocket connection.
+
+        Args:
+            None.
+        """
+        if self.client:
+            try:
+                ws = getattr(self.client, "_websocket", None)
+
+                if ws and not ws.closed:
+                    await ws.close()
+                    logger.info("EventSub WebSocket closed")
+                else:
+                    logger.info("EventSub WebSocket already closed")
+
+            except Exception:
+                logger.exception("Error closing EventSub WebSocket")
+
+            finally:
+                self.client = None
+
+        else:
+            logger.info("EventSub WebSocket was never created")

@@ -1,14 +1,11 @@
-import asyncio
 import logging
 import os
-from contextlib import suppress
 from typing import Any
 
 from twitchio import Message
 from twitchio.ext import commands
 
 from src.api.twitch_api import TwitchAPI
-from src.bot.token_refresh import periodic_refresh
 from src.commands.command_handler import CommandHandler
 from src.commands.permissions import is_admin
 from src.commands.triggers.text_triggers import build_triggers
@@ -32,7 +29,6 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
     command_handler: CommandHandler
     eventsub: EventSubManager
     triggers: dict[str, Any]
-    token_refresh_task: asyncio.Task[None] | None
 
     def __init__(self, token_manager: TokenManager, bot_token: str) -> None:
         """
@@ -82,6 +78,7 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
     async def event_ready(self) -> None:
         """Called when the bot is ready and connected to Twitch."""
         logger.info("Bot ready")
+        self.is_connected = True
 
         if self.db:
             try:
@@ -91,9 +88,6 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
                 self.db = None
 
         await self.eventsub.setup()
-
-        if not self.token_refresh_task:
-            self.token_refresh_task = asyncio.create_task(periodic_refresh(self))
 
     async def event_message(self, message: Message) -> None:
         """
@@ -105,7 +99,7 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
         if message.echo:
             return
 
-        text: str = message.content.lower()
+        text = message.content.lower()
 
         for kw in self.triggers["gnome_keywords"]:
             if kw in text:
@@ -179,13 +173,25 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
     async def close(self) -> None:
         """Clean up resources and close the bot gracefully."""
         logger.info("Shutdown...")
+        self.is_connected = False
 
-        if self.token_refresh_task:
-            self.token_refresh_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await self.token_refresh_task
+        try:
+            await self.eventsub.close()
+        except Exception:
+            pass
+
+        try:
+            await self.api.close()
+        except Exception:
+            pass
 
         if self.db:
             await self.db.close()
 
-        await super().close()
+        try:
+            await super().close()
+        except Exception:
+            pass
+
+        logger.info("TwitchBot closed")
+        self._running = False
