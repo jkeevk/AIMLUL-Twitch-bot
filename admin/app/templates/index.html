@@ -85,7 +85,7 @@
             </div>
             <div class="card-body">
                 <div class="row g-2">
-                    {% for container_name in ['twitch-bot', 'twitch-db'] %}
+                    {% for container_name in ['twitch-bot', 'twitch-db', 'twitchbot-nginx-1', 'admin'] %}
                     <div class="col-md-6">
                         <div class="card h-100">
                             <div class="card-body">
@@ -229,7 +229,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Check container status on load
     function checkContainerStatus() {
-        ['twitch-bot', 'twitch-db'].forEach(container => {
+        ['twitch-bot', 'twitch-db', 'twitchbot-nginx-1', 'admin'].forEach(container => {
             setTimeout(() => {
                 containerAction(container, 'status', true);
             }, 1000);
