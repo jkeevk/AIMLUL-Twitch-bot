@@ -35,7 +35,7 @@ class Settings(BaseSettings):  # type: ignore[misc]
     default_ssh_username: str = "root"
     default_ssh_password: str = ""
 
-    default_container: str = "twitch-bot"
+    default_container: str = "bot"
 
     secret_key: str = "SUPER_SECRET_KEY_CHANGE_ME"
     jwt_algorithm: str = "HS256"

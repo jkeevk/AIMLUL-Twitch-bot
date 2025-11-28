@@ -1,9 +1,9 @@
 services:
-  twitch-bot:
+  bot:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: twitch-bot
+    container_name: bot
     restart: unless-stopped
     depends_on:
       db:
@@ -24,7 +24,7 @@ services:
 
   db:
     image: postgres:17
-    container_name: twitch-db
+    container_name: db
     environment:
       POSTGRES_USER: bot
       POSTGRES_PASSWORD: botpassword
@@ -92,6 +92,7 @@ services:
 
   nginx:
     image: nginx:alpine
+    container_name: nginx
     ports:
       - "80:80"
       - "443:443"
@@ -110,7 +111,7 @@ services:
         condition: service_healthy
     
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
+      test: ["CMD", "curl", "-f", "-k", "https://localhost/health"]
       interval: 30s
       timeout: 10s
       retries: 3
