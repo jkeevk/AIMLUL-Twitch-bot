@@ -21,15 +21,12 @@ class Settings(BaseSettings):  # type: ignore[misc]
         default_container (str): Default Docker container name.
         secret_key (str): JWT secret key.
         jwt_algorithm (str): JWT signing algorithm.
-        ssh_pool_max_connections (int): Max SSH connections in pool.
-        ssh_pool_timeout (int): SSH pool timeout in seconds.
-        log_level (str): Logging level.
     """
 
     auth_username: str = "admin"
     auth_password: str = "password"
     password_attempts_limit: int = 5
-    session_timeout_minutes: int = 30
+    session_timeout_minutes: int = 15
 
     default_ssh_host: str = "localhost"
     default_ssh_username: str = "root"
@@ -39,11 +36,6 @@ class Settings(BaseSettings):  # type: ignore[misc]
 
     secret_key: str = "SUPER_SECRET_KEY_CHANGE_ME"
     jwt_algorithm: str = "HS256"
-
-    ssh_pool_max_connections: int = 5
-    ssh_pool_timeout: int = 300  # seconds
-
-    log_level: str = "INFO"
 
     class Config:
         """Pydantic configuration for environment variable loading."""
@@ -67,5 +59,4 @@ class Settings(BaseSettings):  # type: ignore[misc]
         return v
 
 
-# Global settings instance
 settings = Settings()
