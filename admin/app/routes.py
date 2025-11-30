@@ -136,6 +136,7 @@ async def logout() -> RedirectResponse:
     Returns:
         RedirectResponse: Redirect to login page.
     """
+    await websocket_manager.cleanup()
     resp = RedirectResponse("/login")
     resp.delete_cookie("session")
     return resp
