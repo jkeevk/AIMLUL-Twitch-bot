@@ -1,29 +1,15 @@
-"""
-Main FastAPI application for Docker container management.
-
-Features:
-- JWT authentication (cookie-based)
-- SSH command execution via Paramiko with connection pooling
-- Live Docker logs streaming via WebSocket (thread → async safe)
-- Rate limiting and brute force protection
-- Comprehensive error handling and validation
-- Web UI for remote container management
-"""
-
+import asyncio
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-import paramiko
 from app.config import settings
-from app.models import ErrorResponse
 from app.routes import router
+from app.ssh_client import ssh_pool
 from app.templates import static_directory
 from app.websocket_manager import websocket_manager
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 load_dotenv()
@@ -31,8 +17,6 @@ load_dotenv()
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s | %(levelname)s | %(name)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
 )
-
-logging.getLogger("paramiko").setLevel(logging.WARNING)
 logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
@@ -55,11 +39,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         logger.warning(f"Generated secret key for development: {generated_key}")
 
     logger.info("Application startup completed")
-
     yield
-
     logger.info("Shutting down Docker Container Manager...")
-    websocket_manager.cleanup()
+
+    try:
+        await asyncio.wait_for(websocket_manager.cleanup(), timeout=5)
+    except TimeoutError:
+        logger.warning("WebSocket cleanup timeout! Some tasks might still be running.")
+
+    try:
+        await asyncio.wait_for(ssh_pool.close_all(), timeout=5)
+    except TimeoutError:
+        logger.warning("SSH pool cleanup timeout! Some connections might remain open.")
+
     logger.info("Application shutdown completed")
 
 
@@ -74,71 +66,26 @@ app.mount("/static", StaticFiles(directory=static_directory), name="static")
 app.include_router(router)
 
 
-@app.exception_handler(paramiko.ssh_exception.SSHException)  # type: ignore[misc]
-async def ssh_exception_handler(request: Request, exc: paramiko.ssh_exception.SSHException) -> JSONResponse:
-    """
-    Handle SSH connection exceptions.
-
-    Args:
-        request (Request): FastAPI request object.
-        exc (SSHException): SSH exception.
-
-    Returns:
-        JSONResponse: Error response.
-    """
-    return JSONResponse(status_code=502, content=ErrorResponse(error="SSH connection failed", details=str(exc)).dict())
+@app.on_event("startup")
+async def startup_event() -> None:
+    """Log FastAPI startup."""
+    logger.info("Starting FastAPI app...")
 
 
-@app.exception_handler(TimeoutError)  # type: ignore[misc]
-async def timeout_handler(request: Request, exc: TimeoutError) -> JSONResponse:
-    """
-    Handle timeout exceptions.
+@app.on_event("shutdown")
+async def shutdown_event() -> None:
+    """Close all WebSocket and SSH connections on shutdown."""
+    logger.info("Shutting down FastAPI app...")
 
-    Args:
-        request (Request): FastAPI request object.
-        exc (TimeoutError): Timeout exception.
+    try:
+        await asyncio.wait_for(websocket_manager.cleanup(), timeout=5)
+    except TimeoutError:
+        logger.warning("WebSocket cleanup timeout!")
 
-    Returns:
-        JSONResponse: Error response.
-    """
-    return JSONResponse(
-        status_code=504,
-        content=ErrorResponse(error="Connection timeout", details="The operation took too long to complete").dict(),
-    )
-
-
-@app.exception_handler(RequestValidationError)  # type: ignore[misc]
-async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
-    """
-    Handle request validation errors.
-
-    Args:
-        request (Request): FastAPI request object.
-        exc (RequestValidationError): Validation exception.
-
-    Returns:
-        JSONResponse: Error response.
-    """
-    return JSONResponse(status_code=422, content=ErrorResponse(error="Validation error", details=str(exc)).dict())
-
-
-@app.exception_handler(500)  # type: ignore[misc]
-async def internal_server_error_handler(request: Request, exc: Exception) -> JSONResponse:
-    """
-    Handle internal server errors.
-
-    Args:
-        request (Request): FastAPI request object.
-        exc (Exception): Internal server error.
-
-    Returns:
-        JSONResponse: Error response.
-    """
-    logger.error(f"Internal server error: {exc}")
-    return JSONResponse(
-        status_code=500,
-        content=ErrorResponse(error="Internal server error", details="An unexpected error occurred").dict(),
-    )
+    try:
+        await asyncio.wait_for(ssh_pool.close_all(), timeout=5)
+    except TimeoutError:
+        logger.warning("SSH pool cleanup timeout!")
 
 
 if __name__ == "__main__":
