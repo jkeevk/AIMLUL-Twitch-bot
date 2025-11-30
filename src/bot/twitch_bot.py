@@ -123,38 +123,38 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
         """
         await handle_eventsub_reward(event, self)
 
-    @commands.command(name="жопа")  # type: ignore[misc]
+    @commands.command(name="жопа")
     async def butt(self, ctx: commands.Context) -> None:
         """Handle the butt command."""
         if self.active:
             await self.command_handler.handle_butt(ctx)
 
-    @commands.command(name="дрын")  # type: ignore[misc]
+    @commands.command(name="дрын")
     async def club(self, ctx: commands.Context) -> None:
         """Handle the club command."""
         if self.active:
             await self.command_handler.handle_club(ctx)
 
-    @commands.command(name="бочка")  # type: ignore[misc]
+    @commands.command(name="бочка")
     async def test_barrel(self, ctx: commands.Context) -> None:
         """Handle the test barrel command (admin only)."""
         if not is_admin(self, ctx.author.name):
             return
         await self.command_handler.handle_barrel(ctx)
 
-    @commands.command(name="я")  # type: ignore[misc]
+    @commands.command(name="я")
     async def me(self, ctx: commands.Context) -> None:
         """Handle the me command to show user stats."""
         if self.active:
             await self.command_handler.handle_me(ctx)
 
-    @commands.command(name="топ")  # type: ignore[misc]
+    @commands.command(name="топ")
     async def leaders(self, ctx: commands.Context) -> None:
         """Handle the leaders command to show top users."""
         if self.active:
             await self.command_handler.handle_leaders(ctx)
 
-    @commands.command(name="ботзаткнись")  # type: ignore[misc]
+    @commands.command(name="ботзаткнись")
     async def bot_sleep(self, ctx: commands.Context) -> None:
         """Deactivate the bot (admin only)."""
         if not is_admin(self, ctx.author.name):
@@ -162,7 +162,7 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
         self.active = False
         await ctx.send("banka Алибидерчи! Бот выключен.")
 
-    @commands.command(name="ботговори")  # type: ignore[misc]
+    @commands.command(name="ботговори")
     async def bot_wake(self, ctx: commands.Context) -> None:
         """Activate the bot (admin only)."""
         if not is_admin(self, ctx.author.name):

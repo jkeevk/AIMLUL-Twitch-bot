@@ -6,8 +6,8 @@ from contextlib import asynccontextmanager
 from app.config import settings
 from app.routes.api import router
 from app.services.ssh_client import ssh_pool
-from app.utils.jinja_setup import static_directory
 from app.services.websocket_manager import websocket_manager
+from app.utils.jinja_setup import static_directory
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles

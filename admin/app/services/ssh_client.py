@@ -2,9 +2,12 @@ import asyncio
 import contextlib
 import logging
 import time
+from asyncio.subprocess import Process
+from collections.abc import AsyncIterator
+from types import TracebackType
+from typing import Optional
 
 import asyncssh
-
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -114,7 +117,12 @@ class AsyncSSHWrapper:
         self.client = await ssh_pool.get_client(self.host, self.username, self.password)
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: Optional["TracebackType"],
+    ) -> None:
         """
         Exit the async context manager.
 
@@ -155,7 +163,7 @@ class AsyncSSHWrapper:
             return f"Error: {e}"
 
     @contextlib.asynccontextmanager
-    async def get_process(self, command: str):
+    async def get_process(self, command: str) -> AsyncIterator[Process]:
         """
         Context manager for streaming command output.
 

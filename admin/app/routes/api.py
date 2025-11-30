@@ -3,16 +3,15 @@ import time
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Form, Request, WebSocket, WebSocketDisconnect, status
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-
 from app.config import settings
 from app.dependencies import get_client_ip, get_current_user_optional, verify_token
 from app.models import SSHConnectionRequest
 from app.security import create_token, login_attempts
-from app.services.websocket_manager import websocket_manager
 from app.services.ssh_client import AsyncSSHWrapper
+from app.services.websocket_manager import websocket_manager
 from app.utils.jinja_setup import templates
+from fastapi import APIRouter, Depends, Form, Request, WebSocket, WebSocketDisconnect, status
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -45,7 +44,7 @@ async def root(request: Request) -> HTMLResponse:
     )
 
 
-@router.get("/login", response_class=HTMLResponse)  # type: ignore[misc]
+@router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request) -> HTMLResponse:
     """Render login page.
 
@@ -58,7 +57,7 @@ async def login_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse("login.html", {"request": request})
 
 
-@router.post("/login", response_model=None)  # type: ignore[misc]
+@router.post("/login", response_model=None)
 async def login_post(
     request: Request,
     username: str = Form(...),
@@ -130,7 +129,7 @@ async def login_post(
     )
 
 
-@router.get("/logout")  # type: ignore[misc]
+@router.get("/logout")
 async def logout() -> RedirectResponse:
     """Logout user by clearing session cookie.
 
@@ -143,7 +142,7 @@ async def logout() -> RedirectResponse:
     return resp
 
 
-@router.post("/logs", response_class=HTMLResponse)  # type: ignore[misc]
+@router.post("/logs", response_class=HTMLResponse)
 async def fetch_logs(
     request: Request,
     ip: str = Form(...),
@@ -200,7 +199,7 @@ async def fetch_logs(
     )
 
 
-@router.post("/container/action")  # type: ignore[misc]
+@router.post("/container/action")
 async def container_action(
     ip: str = Form(...),
     username: str = Form(...),
@@ -247,7 +246,7 @@ async def container_action(
         return JSONResponse({"status": "error", "result": str(e)}, status_code=500)
 
 
-@router.websocket("/ws/logs")  # type: ignore[misc]
+@router.websocket("/ws/logs")
 async def websocket_logs(websocket: WebSocket) -> None:
     """WebSocket endpoint for live Docker logs streaming.
 
@@ -280,7 +279,7 @@ async def websocket_logs(websocket: WebSocket) -> None:
             pass
 
 
-@router.get("/health")  # type: ignore[misc]
+@router.get("/health")
 async def health_check() -> JSONResponse:
     """Health check endpoint for service monitoring.
 

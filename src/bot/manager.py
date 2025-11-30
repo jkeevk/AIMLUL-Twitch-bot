@@ -3,7 +3,7 @@ import logging
 
 from aiohttp import web
 
-from bot.twitch_bot import TwitchBot
+from src.bot.twitch_bot import TwitchBot
 from src.utils.token_manager import TokenManager
 
 logger = logging.getLogger(__name__)

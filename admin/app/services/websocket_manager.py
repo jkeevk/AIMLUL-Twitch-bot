@@ -1,10 +1,10 @@
 import asyncio
 import logging
+from asyncio import StreamReader
 from typing import Any
 
-from fastapi import WebSocket, WebSocketDisconnect
-
 from app.services.ssh_client import AsyncSSHWrapper
+from fastapi import WebSocket, WebSocketDisconnect
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +55,7 @@ class WebSocketManager:
         pwd = data.get("password", "")
         container = data["container"]
 
-        process = None
+        process: Any = None
         try:
             async with AsyncSSHWrapper(ip, user, pwd) as ssh:
                 history = await ssh.exec(f"docker logs --tail 50 {container} 2>&1")
@@ -65,6 +65,10 @@ class WebSocketManager:
                 async with ssh.get_process(cmd) as process:
                     self.processes[connection_id] = process
 
+                    stdout: StreamReader | None = getattr(process, "stdout", None)
+                    if stdout is None:
+                        logger.error(f"No stdout for process {connection_id}")
+                        return
                     while True:
                         try:
                             line = await asyncio.wait_for(process.stdout.readline(), timeout=1.0)

@@ -63,7 +63,7 @@ class LoginAttempts:
             attempt = self.attempts.get(ip)
             if not attempt:
                 return False
-            blocked_until = attempt.get("blocked_until", 0)
+            blocked_until: float = attempt.get("blocked_until", 0)
             return time.time() < blocked_until
 
     async def clear_attempts(self, ip: str) -> None:
