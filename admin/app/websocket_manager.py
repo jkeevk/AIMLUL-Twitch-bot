@@ -63,40 +63,40 @@ class WebSocketManager:
                 cmd = f"docker logs -f --tail 0 {container} 2>&1"
                 async with ssh.get_process(cmd) as process:
                     self.processes[connection_id] = process
-                    buffer = []
-                    last_flush = asyncio.get_running_loop().time()
-                    flush_interval = 0.3
 
-                    async for line in process.stdout:
-                        buffer.append(line)
-                        now = asyncio.get_running_loop().time()
-                        if len(buffer) > 20 or (now - last_flush) > flush_interval:
-                            try:
-                                await websocket.send_text("".join(buffer))
-                                buffer = []
-                                last_flush = now
-                            except Exception:
-                                process.terminate()
-                                break
-                    if buffer:
+                    while True:
                         try:
-                            await websocket.send_text("".join(buffer))
+                            line = await asyncio.wait_for(process.stdout.readline(), timeout=1.0)
+                        except TimeoutError:
+                            await websocket.send_text("")
+                            continue
+
+                        if not line:
+                            break
+
+                        try:
+                            await websocket.send_text(line)
                         except Exception:
-                            pass
+                            break
+
+
         except (WebSocketDisconnect, ConnectionError):
-            logger.info(f"Client {connection_id} disconnected normally")
+            logger.info(f"WebSocket {connection_id} disconnected")
         except Exception as e:
-            logger.error(f"Stream error for {connection_id}: {e}")
+            logger.error(f"Log stream error {connection_id}: {e}")
             if websocket:
                 try:
-                    await websocket.send_text(f"\nCRITICAL ERROR: {str(e)}")
+                    await websocket.send_text(f"ERROR: {e}")
                 except Exception:
                     pass
         finally:
             if process:
                 try:
-                    process.terminate()
-                    await asyncio.wait_for(process.wait_closed(), timeout=3)
+                    process.kill()
+                except Exception:
+                    pass
+                try:
+                    await asyncio.shield(asyncio.wait_for(process.wait(), timeout=2))
                 except Exception:
                     pass
             self.disconnect(connection_id)
