@@ -35,7 +35,7 @@
             --accent-glow: rgba(99, 102, 241, 0.15);
             --border: rgba(255,255,255,0.08);
             --success: #10b981;
-            --warning: #f59e0b;
+            --warning: #734f13;
             --danger: #ef4444;
         }
 
@@ -247,22 +247,22 @@
         }
 
         .container-btn-start {
-            border-color: var(--success) !important;
+            border-color: transparent;
             color: var(--success) !important;
-            background: rgba(16, 185, 129, 0.1) !important;
+            background: transparent;
         }
 
         .container-btn-start:hover {
             background: var(--success) !important;
-            color: white !important;
+            color: #000000 !important;
             transform: translateY(-1px);
             box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
         }
 
         .container-btn-stop {
-            border-color: var(--danger) !important;
+            border-color: transparent;
             color: var(--danger) !important;
-            background: rgba(239, 68, 68, 0.1) !important;
+            background: transparent;
         }
 
         .container-btn-stop:hover {
@@ -273,9 +273,9 @@
         }
 
         .container-btn-restart {
-            border-color: var(--warning) !important;
+            border-color: transparent;
             color: var(--warning) !important;
-            background: rgba(245, 158, 11, 0.1) !important;
+            background: transparent;
         }
 
         .container-btn-restart:hover {
@@ -286,9 +286,9 @@
         }
 
         .container-btn-status {
-            border-color: var(--accent) !important;
+            border-color: transparent;
             color: var(--accent) !important;
-            background: rgba(99, 102, 241, 0.1) !important;
+            background: transparent;
         }
 
         .container-btn-status:hover {
@@ -366,9 +366,9 @@
         }
 
         .btn-primary {
-            background: var(--accent);
+            background: transparent;
             border-color: var(--accent);
-            color: white;
+            color: var(--accent);
         }
 
         .btn-primary:hover {
@@ -379,13 +379,13 @@
         }
 
         .btn-success {
-            background: var(--success);
+            background: transparent;
             border-color: var(--success);
             color: white;
         }
 
         .btn-danger {
-            background: var(--danger);
+            background: transparent;
             border-color: var(--danger);
             color: white;
         }
@@ -493,6 +493,91 @@
             animation: fadeInUp 0.6s ease-out;
         }
 
+        .light-theme .btn-outline-primary,
+        .light-theme .btn-outline-success,
+        .light-theme .btn-outline-danger {
+            border-color: transparent !important;
+            color: #000 !important;
+            background: transparent !important;
+        }
+
+        .light-theme .btn-outline-primary:hover {
+            background: var(--accent) !important;
+            border-color: var(--accent) !important;
+            color: #fff !important;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px var(--accent-glow);
+        }
+
+        .light-theme .btn-outline-success:hover {
+            background: var(--success) !important;
+            border-color: var(--success) !important;
+            color: #fff !important;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(16, 185, 129, 0.3);
+        }
+
+        .light-theme .btn-outline-danger:hover {
+            background: var(--danger) !important;
+            border-color: var(--danger) !important;
+            color: #fff !important;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(239, 68, 68, 0.3);
+        }
+
+        .light-theme #getLogsBtn {
+            color: #6366f1 !important;
+        }
+
+        .light-theme #streamBtn {
+            color: #10b981 !important;
+        }
+
+        .light-theme #stopBtn {
+            color: black;
+        }
+
+        .light-theme #getLogsBtn:hover {
+            background: var(--accent) !important;
+            border-color: var(--accent) !important;
+            color: #fff !important;
+        }
+
+        .light-theme #streamBtn:hover {
+            background: var(--success) !important;
+            border-color: var(--success) !important;
+            color: #fff !important;
+        }
+
+        .light-theme #stopBtn:hover {
+            background: var(--danger) !important;
+            border-color: var(--danger) !important;
+            color: #fff !important;
+        }
+
+        .light-theme .btn-outline-primary:active,
+        .light-theme .btn-outline-primary:focus {
+            background: var(--accent) !important;
+            border-color: var(--accent) !important;
+            color: #fff !important;
+            box-shadow: 0 0 0 3px var(--accent-glow) !important;
+        }
+
+        .light-theme .btn-outline-success:active,
+        .light-theme .btn-outline-success:focus {
+            background: var(--success) !important;
+            border-color: var(--success) !important;
+            color: #fff !important;
+            box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.3) !important;
+        }
+
+        .light-theme .btn-outline-danger:active,
+        .light-theme .btn-outline-danger:focus {
+            background: var(--danger) !important;
+            border-color: var(--danger) !important;
+            color: #fff !important;
+            box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.3) !important;
+        }
         @keyframes fadeInUp {
             from {
                 opacity: 0;
@@ -781,7 +866,7 @@
             return `
                 <div class="d-flex align-items-center">
                     <i class="fas fa-${icons[type] || 'info-circle'} me-2"></i>
-                    <span class="text-primary">${message}</span>
+                    <span style="color: black; font-weight: 500;">${message}</span>
                     <button type="button" class="btn-close ms-auto" onclick="this.parentElement.parentElement.remove()"></button>
                 </div>
             `;
