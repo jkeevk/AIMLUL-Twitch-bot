@@ -1,194 +1,136 @@
+import asyncio
+import contextlib
 import logging
 import time
-from collections.abc import Generator
-from contextlib import contextmanager
-from threading import Lock
-from typing import Any
 
-import paramiko
+import asyncssh
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
 
-class SSHConnection:
-    """SSH connection wrapper with usage tracking.
-
-    Attributes:
-        client: Paramiko SSH client.
-        last_used: Timestamp of last usage.
-        in_use: Whether connection is currently in use.
-        usage_count: Total number of times connection has been used.
-    """
-
-    def __init__(self, client: paramiko.SSHClient):
-        """
-        Initialize SSH connection.
-
-        Args:
-            client: Paramiko SSH client.
-        """
-        self.client = client
-        self.last_used: float = time.time()
-        self.in_use: bool = False
-        self.usage_count: int = 0
-
-
 class SSHConnectionPool:
     """Pool for managing and reusing SSH connections."""
 
-    def __init__(self, max_connections: int = 5, timeout: int = 300):
+    def __init__(self, idle_timeout: int = 300):
+        self._connections: dict[str, asyncssh.SSHClientConnection] = {}
+        self._last_access: dict[str, float] = {}
+        self._lock = asyncio.Lock()
+        self._idle_timeout = idle_timeout
+
+    async def get_client(self, host: str, username: str, password: str) -> asyncssh.SSHClientConnection:
         """
-        Initialize connection pool.
+        Get an SSH client from the pool or establish a new connection.
 
         Args:
-            max_connections: Maximum number of connections in pool.
-            timeout: Connection timeout in seconds.
-        """
-        self.max_connections = max_connections
-        self.timeout = timeout
-        self.connections: dict[str, SSHConnection] = {}
-        self.lock = Lock()
-
-    def get_connection(self, host: str, username: str, password: str) -> paramiko.SSHClient | None:
-        """
-        Get SSH connection from pool or create a new one.
-
-        Args:
-            host: SSH host address.
+            host: SSH host.
             username: SSH username.
             password: SSH password.
 
         Returns:
-            Optional[paramiko.SSHClient]: SSH client or None if connection failed.
+            SSHClientConnection instance.
         """
-        with self.lock:
-            key = f"{host}:{username}"
-            self._cleanup()
+        key = f"{host}:{username}:{password}"
+        async with self._lock:
+            await self._cleanup()
+            client = self._connections.get(key)
 
-            if key in self.connections and not self.connections[key].in_use:
-                conn = self.connections[key]
-                conn.in_use = True
-                conn.last_used = time.time()
-                conn.usage_count += 1
-                return conn.client
-
-            if len(self.connections) < self.max_connections:
+            if client:
                 try:
-                    client = paramiko.SSHClient()
-                    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                    client.connect(host, username=username, password=password, timeout=8)
+                    await asyncio.wait_for(client.run("echo healthcheck", timeout=3), timeout=5)
+                except (TimeoutError, asyncssh.ConnectionLost, asyncssh.ChannelOpenError, Exception):
+                    client.close()
+                    await client.wait_closed()
+                    self._connections.pop(key, None)
+                    self._last_access.pop(key, None)
+                    client = None
 
-                    self.connections[key] = SSHConnection(client=client)
-                    self.connections[key].in_use = True
-                    self.connections[key].usage_count = 1
-                    return client
+            if client is None:
+                try:
+                    client = await asyncio.wait_for(
+                        asyncssh.connect(
+                            host,
+                            username=username,
+                            password=password,
+                            known_hosts=None,
+                            options=asyncssh.SSHClientConnectionOptions(keepalive_interval=30, keepalive_count_max=3),
+                        ),
+                        timeout=10,
+                    )
+                    self._connections[key] = client
+                    self._last_access[key] = time.time()
                 except Exception as e:
-                    logger.error(f"SSH connection failed to {host}: {e}")
-                    return None
-            return None
+                    logger.error(f"Failed to connect to {key}: {e}")
+                    raise
 
-    def release_connection(self, host: str, username: str) -> None:
-        """
-        Release a connection back to the pool.
+            self._last_access[key] = time.time()
+            return client
 
-        Args:
-            host: SSH host address.
-            username: SSH username.
-        """
-        key = f"{host}:{username}"
-        with self.lock:
-            if key in self.connections:
-                self.connections[key].in_use = False
+    async def _cleanup(self) -> None:
+        now = time.time()
+        keys_to_remove = [k for k, t in self._last_access.items() if now - t > self._idle_timeout]
+        for key in keys_to_remove:
+            conn = self._connections.pop(key, None)
+            self._last_access.pop(key, None)
+            if conn:
+                try:
+                    await conn.wait_closed()
+                except Exception:
+                    pass
 
-    def _cleanup(self) -> None:
-        """Clean up stale and inactive connections."""
-        current_time = time.time()
-        to_remove: list[str] = []
-
-        for key, conn in self.connections.items():
-            transport = conn.client.get_transport()
-            if (current_time - conn.last_used > self.timeout) or not transport or not transport.is_active():
-                conn.client.close()
-                to_remove.append(key)
-
-        for key in to_remove:
-            del self.connections[key]
-
-    def get_pool_stats(self) -> dict[str, Any]:
-        """
-        Get connection pool statistics.
-
-        Returns:
-            Dict[str, Any]: Pool statistics.
-        """
-        with self.lock:
-            active = sum(1 for conn in self.connections.values() if conn.in_use)
-            return {
-                "total_connections": len(self.connections),
-                "active_connections": active,
-                "idle_connections": len(self.connections) - active,
-            }
+    async def close_all(self) -> None:
+        """Close all SSH connections in the pool."""
+        async with self._lock:
+            for key, conn in list(self._connections.items()):
+                self._connections.pop(key, None)
+                self._last_access.pop(key, None)
+                try:
+                    conn.close()
+                    await asyncio.wait_for(conn.wait_closed(), timeout=5)
+                except Exception:
+                    pass
 
 
-class SSHClientWrapper:
-    """
-    Thread-safe SSH client wrapper with connection pooling.
+ssh_pool = SSHConnectionPool()
 
-    Supports:
-    - Command execution with connection reuse
-    - Docker logs streaming
-    - Automatic connection cleanup
-    """
+
+class AsyncSSHWrapper:
+    """Wrapper for executing SSH commands using the connection pool."""
 
     def __init__(self, host: str, username: str, password: str):
-        """
-        Initialize SSH client wrapper.
-
-        Args:
-            host: SSH host address.
-            username: SSH username.
-            password: SSH password.
-        """
         self.host = host
         self.username = username
-        self.password = password.strip() or settings.default_ssh_password
-        self.client: paramiko.SSHClient | None = None
-        self.from_pool: bool = False
+        self.password = settings.default_ssh_password if password == "" else password
+        self.client: asyncssh.SSHClientConnection | None = None
 
-    def __enter__(self) -> "SSHClientWrapper":
-        """Enter context manager and establish SSH connection."""
-        self.client = ssh_pool.get_connection(self.host, self.username, self.password)
-        self.from_pool = self.client is not None
-
-        if not self.from_pool:
-            self.client = paramiko.SSHClient()
-            self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            self.client.connect(hostname=self.host, username=self.username, password=self.password, timeout=8)
-        return self
-
-    def __exit__(
-        self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: object | None
-    ) -> bool | None:
+    async def __aenter__(self) -> "AsyncSSHWrapper":
         """
-        Exit context manager and release or close SSH connection.
-
-        Args:
-            exc_type: Exception type if raised.
-            exc_val: Exception instance if raised.
-            exc_tb: Traceback object if exception raised.
+        Enter the async context manager.
 
         Returns:
-            Optional[bool]: True to suppress exception, None otherwise.
+            AsyncSSHWrapper: The SSH wrapper instance.
         """
-        if self.client:
-            if self.from_pool:
-                ssh_pool.release_connection(self.host, self.username)
-            else:
-                self.client.close()
-        return None
+        self.client = await ssh_pool.get_client(self.host, self.username, self.password)
+        return self
 
-    def exec(self, command: str) -> str:
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        """
+        Exit the async context manager.
+
+        Args:
+            exc_type: Exception type if an exception occurred.
+            exc_val: Exception value if an exception occurred.
+            exc_tb: Exception traceback if an exception occurred.
+        """
+        if exc_type is not None and self.client:
+            self.client.close()
+            await self.client.wait_closed()
+            key = f"{self.host}:{self.username}:{self.password}"
+            async with ssh_pool._lock:
+                ssh_pool._connections.pop(key, None)
+                ssh_pool._last_access.pop(key, None)
+
+    async def exec(self, command: str) -> str:
         """
         Execute an SSH command and return its output.
 
@@ -205,41 +147,24 @@ class SSHClientWrapper:
             raise RuntimeError("SSH client not initialized")
 
         try:
-            _, stdout, stderr = self.client.exec_command(command)
-            out = stdout.read().decode().strip()
-            err = stderr.read().decode().strip()
-            return err if err and not out else out or "Command executed successfully"
-        except Exception as exc:
-            logger.error(f"SSH command failed: {exc}")
-            return f"SSH Error: {exc}"
+            result = await self.client.run(command, check=False)
+            return (result.stdout or "") + (result.stderr or "")
+        except Exception as e:
+            logger.error(f"Command failed: {e}")
+            return f"Error: {e}"
 
+    @contextlib.asynccontextmanager
+    async def get_process(self, command: str):
+        """
+        Context manager for streaming command output.
 
-@contextmanager
-def ssh_command_context(ip: str, username: str, command: str) -> Generator[None]:
-    """
-    Context manager for SSH command execution with logging.
+        Args:
+            command: Command string.
 
-    Args:
-        ip: SSH host IP.
-        username: SSH username.
-        command: Command to execute.
-    """
-    start_time = time.time()
-    success = False
-
-    try:
-        yield
-        success = True
-    except Exception as e:
-        logger.error("SSH command failed: %s", e)
-        raise
-    finally:
-        duration = time.time() - start_time
-        logger.info(
-            f"SSH Command: {command[:50]}... | "
-            f"IP: {ip} | User: {username} | "
-            f"Success: {success} | Duration: {duration:.2f}s"
-        )
-
-
-ssh_pool = SSHConnectionPool(max_connections=settings.ssh_pool_max_connections, timeout=settings.ssh_pool_timeout)
+        Yields:
+            AsyncSSH process.
+        """
+        if not self.client:
+            raise RuntimeError("SSH client not connected")
+        async with self.client.create_process(command) as process:
+            yield process
