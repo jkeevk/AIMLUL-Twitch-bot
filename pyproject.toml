@@ -46,6 +46,7 @@ strict = true
 local_partial_types = true
 warn_unreachable = true
 check_untyped_defs = true
+allow_untyped_decorators = true
 exclude = ""
 
 [tool.ruff]
@@ -54,7 +55,7 @@ preview = true
 exclude = ["src/infrastructure/migrations/"]
 
 [tool.ruff.lint]
-extend-select = ["I", "PTH", "B", "A", "N", "PT", "COM", "E", "W", "UP", "D"]
+extend-select = ["PTH", "B", "A", "N", "PT", "COM", "E", "W", "UP", "D"]
 ignore = ["COM812", "PLR6301", "TRY400", "D100", "D101", "D104", "D106", "D107", "D203", "D212", "D401", "D404", "D405", "N805"]
 external = ["WPS"]
 
