@@ -40,7 +40,8 @@ class SSHConnectionPool:
                     await asyncio.wait_for(client.run("echo healthcheck", timeout=3), timeout=5)
                 except (TimeoutError, asyncssh.ConnectionLost, asyncssh.ChannelOpenError, Exception):
                     client.close()
-                    await client.wait_closed()
+                    with contextlib.suppress(Exception):
+                        await client.wait_closed()
                     self._connections.pop(key, None)
                     self._last_access.pop(key, None)
                     client = None
@@ -58,7 +59,6 @@ class SSHConnectionPool:
                         timeout=10,
                     )
                     self._connections[key] = client
-                    self._last_access[key] = time.time()
                 except Exception as e:
                     logger.error(f"Failed to connect to {key}: {e}")
                     raise
@@ -166,5 +166,18 @@ class AsyncSSHWrapper:
         """
         if not self.client:
             raise RuntimeError("SSH client not connected")
-        async with self.client.create_process(command) as process:
+
+        process = None
+
+        try:
+            process = await self.client.create_process(command, stdin=asyncssh.DEVNULL, term_type=None)
             yield process
+
+        finally:
+
+            if process:
+                with contextlib.suppress(Exception):
+                    process.close()
+
+                with contextlib.suppress(Exception):
+                    await asyncio.wait_for(process.wait(), timeout=1)
