@@ -2,7 +2,7 @@ from app.security import decode_token
 from fastapi import HTTPException, Request, status
 
 
-def get_current_user_optional(request: Request) -> str | None:
+async def get_current_user_optional(request: Request) -> str | None:
     """
     Retrieve current user from JWT cookie if it exists.
 
@@ -13,10 +13,15 @@ def get_current_user_optional(request: Request) -> str | None:
         str | None: Username if authenticated, None otherwise.
     """
     token = request.cookies.get("session")
-    return decode_token(token) if token else None
+    if token:
+        try:
+            return await decode_token(token)
+        except Exception:
+            return None
+    return None
 
 
-def verify_token(request: Request) -> str:
+async def verify_token(request: Request) -> str:
     """
     FastAPI dependency to verify that the user is authenticated.
 
@@ -29,7 +34,7 @@ def verify_token(request: Request) -> str:
     Raises:
         HTTPException: If the user is not authenticated.
     """
-    user = get_current_user_optional(request)
+    user = await get_current_user_optional(request)
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     return user
