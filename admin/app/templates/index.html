@@ -52,14 +52,18 @@
                     </div>
 
                     <div class="mt-4 d-flex flex-wrap gap-2 align-items-center">
-                        <button type="submit" class="btn btn-primary" id="getLogsBtn">
+                        <button type="button" id="checkStatusBtn" class="btn btn-primary">
+                            Check All Statuses
+                        </button>
+
+                        <button type="button" class="btn btn-primary" id="getLogsBtn">
                             <i class="fas fa-download me-1"></i>Get Logs
                         </button>
                         <button type="button" class="btn btn-success" id="streamBtn">
-                            <i class="fas fa-play me-1"></i>Start Streaming
+                            <i class="fas fa-play me-1"></i>Start Live Logs
                         </button>
                         <button type="button" class="btn btn-danger" id="stopBtn" disabled>
-                            <i class="fas fa-stop me-1"></i>Stop Streaming
+                            <i class="fas fa-stop me-1"></i>Stop Live Logs
                         </button>
                         <button type="button" class="btn btn-outline-warning" id="clearFormBtn">
                             <i class="fas fa-broom me-1"></i>Clear
@@ -146,6 +150,26 @@
 
 {% block scripts %}
 <script>
+function base64Encode(str) {
+    if (!str) return '';
+    return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g,
+        function(match, p1) {
+            return String.fromCharCode('0x' + p1);
+        }));
+}
+
+function base64Decode(str) {
+    if (!str) return '';
+    try {
+        return decodeURIComponent(atob(str).split('').map(function(c) {
+            return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+        }).join(''));
+    } catch (e) {
+        console.error('Base64 decode error:', e);
+        return 'Decoding Error: Could not retrieve raw output.';
+    }
+}
+
 class WebSocketManager {
     constructor() {
         this.websocket = null;
@@ -216,10 +240,21 @@ class ContainerManager {
             UI.showLoadingState(resultDiv, containerName, action);
         }
 
-        UI.setButtonsLoadingState(containerName, true);
+        if (!silent) {
+            UI.setButtonsLoadingState(containerName, true);
+        }
 
         try {
-            const response = await fetch('/container/action', { method: 'POST', body: formData });
+            const response = await fetch('/container/action', {
+                method: 'POST',
+                body: formData,
+                signal: AbortSignal.timeout(10000)
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
             const data = await response.json();
 
             if (data.status === 'success') {
@@ -237,16 +272,28 @@ class ContainerManager {
                 }
             } else {
                 if (!silent) {
-                    UI.showErrorMessage(resultDiv, containerName, action, data.result);
+                    UI.showErrorMessage(resultDiv, containerName, action, data.result || 'Unknown error');
                 }
                 UI.setErrorStatus(statusBadge);
             }
         } catch (error) {
+            console.error(`Error in container action ${action} for ${containerName}:`, error);
+
             if (!silent) {
-                UI.showConnectionError(resultDiv, containerName, action, error);
+                if (error.name === 'TimeoutError' || error.message.includes('Failed to fetch')) {
+                     UI.showConnectionError(resultDiv, containerName, action, error);
+                } else {
+                    UI.showErrorMessage(resultDiv, containerName, action, error.message);
+                }
+            }
+
+            if (statusBadge && action === 'status') {
+                UI.setErrorStatus(statusBadge);
             }
         } finally {
-            UI.setButtonsLoadingState(containerName, false);
+            if (!silent) {
+                UI.setButtonsLoadingState(containerName, false);
+            }
         }
     }
 
@@ -259,10 +306,11 @@ class ContainerManager {
         let created = 'N/A';
         let ports = 'N/A';
         let name = containerName;
+        let healthStatus = 'unknown';
 
         if (lines.length > 1) {
             const dataLine = lines[1];
-            const parts = dataLine.split(/\s{2,}/);
+            const parts = dataLine.split(/\s{2,}/).filter(p => p.trim());
 
             if (parts.length >= 6) {
                 containerId = parts[0].substring(0, 12);
@@ -270,6 +318,14 @@ class ContainerManager {
                 created = parts[3] || 'N/A';
                 ports = parts[5] || 'N/A';
                 name = parts[6] || containerName;
+
+                if (dataLine.includes('(healthy)')) {
+                    healthStatus = 'healthy';
+                } else if (dataLine.includes('(unhealthy)')) {
+                    healthStatus = 'unhealthy';
+                } else if (dataLine.includes('Up') && !dataLine.includes('(healthy)') && !dataLine.includes('(unhealthy)')) {
+                    healthStatus = 'no-check';
+                }
             }
         }
 
@@ -283,6 +339,8 @@ class ContainerManager {
             created,
             ports,
             name,
+            healthStatus,
+            healthClass: healthStatus === 'healthy' ? 'success' : healthStatus === 'unhealthy' ? 'danger' : 'secondary',
             rawOutput: statusOutput
         };
     }
@@ -417,16 +475,41 @@ class UI {
         const statusColor = statusInfo.isRunning ? 'success' : 'danger';
         const uptimeInfo = statusInfo.isRunning ? this.extractUptime(statusInfo.rawOutput) : null;
 
+        let healthIcon, healthColor, healthText;
+        if (statusInfo.healthStatus === 'healthy') {
+            healthIcon = 'fa-heart';
+            healthColor = 'success';
+            healthText = 'Healthy';
+        } else if (statusInfo.healthStatus === 'unhealthy') {
+            healthIcon = 'fa-heart-broken';
+            healthColor = 'danger';
+            healthText = 'Unhealthy';
+        } else {
+            healthIcon = 'fa-question-circle';
+            healthColor = 'secondary';
+            healthText = 'No Healthcheck';
+        }
+
+        const encodedRawOutput = base64Encode(rawOutput);
+
         return `
-            <div class="card border-${statusColor}" data-raw-output="${btoa(unescape(encodeURIComponent(rawOutput)))}">
+            <div class="card border-${statusColor}" data-raw-output="${encodedRawOutput}">
                 <div class="card-header bg-${statusColor} bg-opacity-10 d-flex justify-content-between align-items-center">
                     <h6 class="mb-0">
                         <i class="fas ${statusInfo.statusIcon} text-${statusColor} me-2"></i>
                         Container Status: <strong>${statusInfo.name}</strong>
                     </h6>
-                    <span class="badge bg-${statusColor}">
-                        <i class="fas ${statusInfo.statusIcon} me-1"></i>${statusInfo.status}
-                    </span>
+                    <div class="d-flex gap-2 align-items-center">
+                        <span class="badge bg-${statusColor}">
+                            <i class="fas ${statusInfo.statusIcon} me-1"></i>${statusInfo.status}
+                        </span>
+                        <span class="badge bg-${healthColor}">
+                            <i class="fas ${healthIcon} me-1"></i>${healthText}
+                        </span>
+                        <button class="btn btn-sm btn-outline-danger" onclick="this.closest('.card').remove()">
+                            <i class="fas fa-times me-1"></i>Close
+                        </button>
+                    </div>
                 </div>
                 <div class="card-body">
                     <div class="row g-3">
@@ -490,7 +573,21 @@ class UI {
 
     static extractUptime(rawOutput) {
         const uptimeMatch = rawOutput.match(/Up\s+((?:\d+\s+\w+\s*)+)/i);
-        return uptimeMatch ? uptimeMatch[1].trim() : 'Unknown';
+        if (uptimeMatch) {
+            return uptimeMatch[1].trim();
+        }
+
+        const relativeMatch = rawOutput.match(/Up\s+(About\s+(?:an?\s+)?\w+\s+(?:ago|minute|hour))/i);
+        if (relativeMatch) {
+            return relativeMatch[1].trim();
+        }
+
+        const aboutMatch = rawOutput.match(/Up\s+(About\s+.*?)(?=\s|$)/i);
+        if (aboutMatch) {
+            return aboutMatch[1].trim();
+        }
+
+        return 'Unknown';
     }
 }
 
@@ -652,7 +749,11 @@ class RawOutputManager {
             </div>
         `;
 
-        rawOutputCard.querySelector('button').setAttribute('data-text', rawOutput);
+        const copyButton = rawOutputCard.querySelector('button');
+        if (copyButton) {
+            copyButton.setAttribute('data-text', this.escapeHtmlForAttribute(rawOutput));
+        }
+
         resultDiv.appendChild(rawOutputCard);
     }
 
@@ -666,11 +767,18 @@ class RawOutputManager {
             .replace(/'/g, "&#039;");
     }
 
+    static escapeHtmlForAttribute(unsafe) {
+        if (!unsafe) return '';
+        return unsafe.replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+    }
+
     static handleRawOutputClick(e) {
         const btn = e.target.closest('.raw-output-btn');
         if (!btn) return;
 
         const card = btn.closest('.card[data-raw-output]');
+        if (!card) return;
+
         const rawOutputBase64 = card.getAttribute('data-raw-output');
         const containerName = btn.getAttribute('data-container');
 
@@ -680,10 +788,11 @@ class RawOutputManager {
         }
 
         try {
-            const rawOutput = decodeURIComponent(escape(atob(rawOutputBase64)));
+            const rawOutput = base64Decode(rawOutputBase64);
             this.show(containerName, rawOutput);
         } catch (e) {
-            this.show(containerName, "Error decoding raw output");
+            console.error('Raw Output decoding failed:', e);
+            this.show(containerName, `Error decoding raw output: ${e.message}`);
         }
     }
 }
@@ -691,48 +800,149 @@ class RawOutputManager {
 class App {
     static init() {
         this.webSocketManager = new WebSocketManager();
+        this.cacheElements();
         this.bindEvents();
-        this.checkContainerStatus();
+        setTimeout(() => {
+            this.checkContainerStatus();
+        }, 500);
+    }
+
+    static cacheElements() {
+        this.elements = {
+            togglePassword: document.getElementById('togglePassword'),
+            quickFillBtn: document.getElementById('quickFillBtn'),
+            clearFormBtn: document.getElementById('clearFormBtn'),
+            clearLogsBtn: document.getElementById('clearLogsBtn'),
+            copyLogsBtn: document.getElementById('copyLogsBtn'),
+            logsForm: document.getElementById('logsForm'),
+            getLogsBtn: document.getElementById('getLogsBtn'),
+            streamBtn: document.getElementById('streamBtn'),
+            stopBtn: document.getElementById('stopBtn'),
+            checkStatusBtn: document.getElementById('checkStatusBtn'),
+            ip: document.getElementById('ip'),
+            username: document.getElementById('username'),
+            password: document.getElementById('password'),
+            container: document.getElementById('container'),
+        };
+        this.containers = ['bot', 'db', 'nginx', 'admin'];
     }
 
     static bindEvents() {
-        document.getElementById('togglePassword').addEventListener('click', FormManager.togglePassword);
-        document.getElementById('quickFillBtn').addEventListener('click', FormManager.quickFill);
-        document.getElementById('clearFormBtn').addEventListener('click', FormManager.clear);
-        document.getElementById('clearLogsBtn').addEventListener('click', FormManager.clearLogs);
-        document.getElementById('copyLogsBtn').addEventListener('click', () => ClipboardManager.copyLogs());
+        const e = this.elements;
+
+        e.togglePassword.addEventListener('click', FormManager.togglePassword);
+        e.quickFillBtn.addEventListener('click', FormManager.quickFill);
+        e.clearFormBtn.addEventListener('click', FormManager.clear);
+        e.clearLogsBtn.addEventListener('click', FormManager.clearLogs);
+        e.copyLogsBtn.addEventListener('click', () => ClipboardManager.copyLogs());
+
         document.addEventListener('click', (e) => RawOutputManager.handleRawOutputClick(e));
 
-        document.getElementById('streamBtn').addEventListener('click', () => {
-            const formData = {
-                ip: document.getElementById('ip').value,
-                username: document.getElementById('username').value,
-                password: document.getElementById('password').value,
-                container: document.getElementById('container').value
-            };
-
-            if (!formData.ip || !formData.username || !formData.container) {
-                Notification.show('Please fill all required fields', 'warning');
-                return;
-            }
-
-            this.webSocketManager.connect(formData);
+        e.getLogsBtn.addEventListener('click', ev => {
+            ev.preventDefault();
+            const data = this.getFormData();
+            if (!this.validateFormData(data)) return Notification.show('Please fill all required fields', 'warning');
+            e.logsForm.submit();
         });
 
-        document.getElementById('stopBtn').addEventListener('click', () => {
-            this.webSocketManager.disconnect();
+        e.checkStatusBtn.addEventListener('click', ev => {
+            ev.preventDefault();
+            this.checkContainerStatus(true);
         });
+
+        e.streamBtn.addEventListener('click', () => {
+            const data = this.getFormData();
+            if (!this.validateFormData(data)) return Notification.show('Please fill all required fields', 'warning');
+            this.webSocketManager.connect(data);
+        });
+
+        e.stopBtn.addEventListener('click', () => this.webSocketManager.disconnect());
     }
 
-    static checkContainerStatus() {
-        ['bot', 'db', 'nginx', 'admin'].forEach(container => {
-            setTimeout(() => {
-                ContainerManager.action(container, 'status', true);
-            }, 1000);
+    static getFormData() {
+        const e = this.elements;
+        return {
+            ip: e.ip.value,
+            username: e.username.value,
+            password: e.password.value,
+            container: e.container.value
+        };
+    }
+
+    static validateFormData({ ip, username, container }) {
+        return ip && username && container;
+    }
+
+    static async checkContainerStatus(force = false) {
+        const data = this.getFormData();
+
+        if (!data.ip || !data.username) {
+            if (force) {
+                Notification.show('Please fill Host IP and Username fields to check container status', 'warning');
+            }
+            return;
+        }
+
+        const btn = this.elements.checkStatusBtn;
+        const originalText = btn.innerHTML;
+
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Checking...';
+        btn.disabled = true;
+
+        if (force) {
+            Notification.show('Checking container status...', 'info');
+        }
+
+        try {
+            await this.checkContainersAllAtOnce(data);
+            if (force) {
+                Notification.show('Container status updated successfully', 'success');
+            }
+        } catch (err) {
+            console.error('Error checking container status:', err);
+            if (force) {
+                Notification.show(`Failed: ${err.message}`, 'error');
+            }
+        } finally {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
+    }
+
+    static async checkContainersAllAtOnce(formData) {
+        const containers = this.containers;
+
+        const originalValues = {};
+        ['ip', 'username', 'password', 'container'].forEach(key => {
+            originalValues[key] = this.elements[key].value;
+            this.elements[key].value = formData[key];
+        });
+
+        try {
+            const promises = containers.map(c => this.checkSingleContainerWithTimeout(c));
+            await Promise.allSettled(promises);
+        } finally {
+            Object.entries(originalValues).forEach(([key, val]) => {
+                this.elements[key].value = val;
+            });
+        }
+    }
+
+
+    static checkSingleContainerWithTimeout(container) {
+        return new Promise(resolve => {
+            let done = false;
+
+            const timeoutId = setTimeout(() => {
+                if (!done) { done = true; console.warn(`Timeout for ${container}`); resolve(); }
+            }, 5000);
+
+            ContainerManager.action(container, 'status', true)
+                .then(() => { if (!done) { done = true; clearTimeout(timeoutId); resolve(); } })
+                .catch(err => { if (!done) { done = true; clearTimeout(timeoutId); console.error(err); resolve(); } });
         });
     }
 }
-
 document.addEventListener('DOMContentLoaded', () => App.init());
 </script>
 {% endblock %}
