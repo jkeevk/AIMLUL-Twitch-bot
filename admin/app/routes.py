@@ -276,3 +276,12 @@ async def websocket_logs(websocket: WebSocket) -> None:
             await websocket.close()
         except Exception:
             pass
+
+@router.get("/health")  # type: ignore[misc]
+async def health_check() -> JSONResponse:
+    """Health check endpoint for service monitoring.
+
+    Returns:
+        JSONResponse: Service status information with timestamp and version.
+    """
+    return JSONResponse(content={"status": "healthy", "timestamp": datetime.utcnow().isoformat(), "version": "1.0.0"})
