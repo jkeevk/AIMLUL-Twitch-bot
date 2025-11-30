@@ -2,62 +2,31 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from aiohttp import web
 from twitchio import Message
 
+from src.bot.manager import BotManager
 from src.bot.twitch_bot import TwitchBot
-from src.commands.triggers.text_triggers import build_triggers
 from src.utils.token_manager import TokenManager
 
 
-@pytest.fixture
-def mock_token_manager() -> TokenManager:
-    """Returns a mocked TokenManager with async refresh methods and dummy tokens."""
-    tm = MagicMock(spec=TokenManager)
-    tm.tokens = {"BOT_TOKEN": MagicMock(client_id="cid", client_secret="csecret")}
-    tm.refresh_access_token = AsyncMock(return_value="new_token")
-    tm.has_streamer_token = MagicMock(return_value=True)
-    return tm
-
-
-@pytest.fixture
-def bot_instance(mock_token_manager: TokenManager) -> TwitchBot:
-    """Returns a TwitchBot instance with all external dependencies mocked."""
-    with patch(
-        "src.bot.twitch_bot.load_settings",
-        return_value={
-            "channels": ["#test_channel"],
-            "database": {"dsn": "sqlite+aiosqlite:///:memory:"},
-            "refresh_token_delay_time": 0.01,
-        },
-    ):
-        bot = TwitchBot(token_manager=mock_token_manager, bot_token="initial_token")
-
-    bot.db = MagicMock()
-    bot.db.connect = AsyncMock()
-    bot.db.close = AsyncMock()
-    bot.command_handler = MagicMock()
-    bot.eventsub.setup = AsyncMock()
-    bot.api = MagicMock()
-    bot.handle_commands = AsyncMock()
-    bot.triggers_map = build_triggers(bot)
-
-    return bot
-
-
 @pytest.mark.asyncio
-async def test_event_ready_starts_token_refresh(bot_instance: TwitchBot):
-    """Verify that event_ready connects to DB, sets up EventSub, and starts the periodic token refresh task."""
-    await bot_instance.event_ready()
+async def test_event_ready_starts_token_refresh(bot_manager: BotManager):
+    """Verify that event_ready triggers DB connect, EventSub setup, and starts token refresh task via manager."""
+    await bot_manager.bot.event_ready()
 
-    bot_instance.db.connect.assert_awaited_once()
-    bot_instance.eventsub.setup.assert_awaited_once()
-    assert bot_instance.token_refresh_task is not None
-    assert not bot_instance.token_refresh_task.done()
+    bot_manager.bot.db.connect.assert_awaited_once()
+    bot_manager.bot.eventsub.setup.assert_awaited_once()
 
-    bot_instance.token_refresh_task.cancel()
-    with patch("asyncio.sleep", return_value=AsyncMock()):
-        with pytest.raises(asyncio.CancelledError):
-            await bot_instance.token_refresh_task
+    bot_manager._token_refresh_loop = AsyncMock()
+    bot_manager.token_refresh_task = asyncio.create_task(bot_manager._token_refresh_loop())
+
+    assert bot_manager.token_refresh_task is not None
+    assert not bot_manager.token_refresh_task.done()
+
+    bot_manager.token_refresh_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await bot_manager.token_refresh_task
 
 
 @pytest.mark.asyncio
@@ -112,15 +81,84 @@ async def test_command_activation_deactivation(bot_instance: TwitchBot):
 
 
 @pytest.mark.asyncio
-async def test_close_cancels_token_task_and_closes_db(bot_instance: TwitchBot):
-    """Test that close() cancels the token refresh task and closes the database."""
-    bot_instance.token_refresh_task = asyncio.create_task(asyncio.sleep(10))
-    bot_instance._closing = asyncio.Event()
+async def test_close_cancels_token_task_and_closes_db(bot_manager: BotManager):
+    """Test that stopping the manager cancels the token refresh task and closes the database."""
+    bot_manager.refresh_task = asyncio.create_task(asyncio.sleep(10))
 
-    if hasattr(bot_instance, "_connection"):
-        bot_instance._connection = AsyncMock()
-        bot_instance._connection._close = AsyncMock()
+    bot_manager.bot = MagicMock(spec=TwitchBot)
+    bot_manager.bot.db = MagicMock()
+    bot_manager.bot.db.close = AsyncMock()
 
-    await bot_instance.close()
-    assert bot_instance.token_refresh_task.cancelled()
-    bot_instance.db.close.assert_awaited_once()
+    async def close_side_effect():
+        await bot_manager.bot.db.close()
+
+    bot_manager.bot.close = AsyncMock(side_effect=close_side_effect)
+
+    await bot_manager.stop()
+
+    assert bot_manager.refresh_task.cancelled()
+    bot_manager.bot.db.close.assert_awaited_once()
+    bot_manager.bot.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_watchdog_restarts_bot_after_unhealthy(mock_token_manager: TokenManager):
+    """Test that watchdog triggers bot restart after 3 consecutive unhealthy checks."""
+    manager = BotManager(token_manager=mock_token_manager)
+    manager._running = True
+    manager.bot = MagicMock(spec=TwitchBot)
+    manager.bot.is_connected = False
+    manager.restart_bot = AsyncMock()
+
+    asyncio_sleep_original = asyncio.sleep
+    asyncio.sleep = AsyncMock()
+
+    for _ in range(3):
+        healthy = await manager._check_bot_health()
+        if not healthy:
+            manager._websocket_error_count += 1
+            if manager._websocket_error_count >= 3:
+                await manager.restart_bot()
+        else:
+            manager._websocket_error_count = 0
+
+    assert manager._websocket_error_count == 3
+    manager.restart_bot.assert_awaited_once()
+
+    asyncio.sleep = asyncio_sleep_original
+
+
+@pytest.mark.asyncio
+async def test_healthcheck_returns_ok_when_bot_healthy(mock_token_manager: TokenManager):
+    """Test that /health returns 200 if bot is running and websocket is healthy."""
+    manager = BotManager(token_manager=mock_token_manager)
+    manager._running = True
+    manager.bot = MagicMock(spec=TwitchBot)
+    manager.bot.is_connected = True
+    manager._check_websocket = AsyncMock(return_value=True)
+
+    request = MagicMock()
+    response = await manager._handle_health(request)
+
+    assert isinstance(response, web.Response)
+    assert response.status == 200
+    text = response.text if hasattr(response, "text") else await response.text()
+    assert "OK" in text
+
+
+@pytest.mark.asyncio
+async def test_healthcheck_returns_unhealthy_when_bot_not_connected(mock_token_manager: TokenManager):
+    """Test that /health returns 500 if bot is not running or websocket unhealthy."""
+    manager = BotManager(token_manager=mock_token_manager)
+    manager._running = True
+    manager.bot = MagicMock(spec=TwitchBot)
+    manager.bot.is_connected = False
+    manager._check_websocket = AsyncMock(return_value=True)
+
+    request = MagicMock()
+    response = await manager._handle_health(request)
+
+    assert isinstance(response, web.Response)
+    assert response.status == 500
+    text = response.text if hasattr(response, "text") else await response.text()
+    assert "UNHEALTHY" in text

@@ -1,11 +1,15 @@
 from dataclasses import dataclass
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from src.bot.manager import BotManager
+from src.bot.twitch_bot import TwitchBot
 from src.commands.games.collectors_game import CollectorsGame
 from src.commands.games.simple_commands import SimpleCommandsGame
 from src.commands.games.twenty_one import TwentyOneGame
+from src.commands.triggers.text_triggers import build_triggers
+from src.utils.token_manager import TokenManager
 
 
 @dataclass
@@ -17,6 +21,49 @@ class DummyAuthor:
         self.name = name
         self.is_mod = privileged
         self.is_broadcaster = privileged
+
+
+@pytest.fixture
+def mock_token_manager() -> TokenManager:
+    """Mocked TokenManager with async refresh and dummy tokens."""
+    tm = MagicMock(spec=TokenManager)
+    tm.tokens = {"BOT_TOKEN": MagicMock(client_id="cid", client_secret="csecret")}
+    tm.refresh_access_token = AsyncMock(return_value="new_token")
+    tm.has_streamer_token = MagicMock(return_value=True)
+    return tm
+
+
+@pytest.fixture
+def bot_instance(mock_token_manager: TokenManager) -> TwitchBot:
+    """Return a TwitchBot instance with dependencies mocked, no start() called."""
+    with patch(
+        "src.bot.twitch_bot.load_settings",
+        return_value={
+            "channels": ["#test_channel"],
+            "database": {"dsn": "sqlite+aiosqlite:///:memory:"},
+            "refresh_token_delay_time": 0.01,
+        },
+    ):
+        bot = TwitchBot(token_manager=mock_token_manager, bot_token="initial_token")
+
+    bot.db = MagicMock()
+    bot.db.connect = AsyncMock()
+    bot.db.close = AsyncMock()
+    bot.command_handler = MagicMock()
+    bot.eventsub.setup = AsyncMock()
+    bot.api = MagicMock()
+    bot.handle_commands = AsyncMock()
+    bot.triggers_map = build_triggers(bot)
+
+    return bot
+
+
+@pytest.fixture
+def bot_manager(bot_instance: TwitchBot, mock_token_manager: TokenManager) -> BotManager:
+    """Return a TwitchBot instance with dependencies mocked, no start() called."""
+    manager = BotManager(token_manager=mock_token_manager)
+    manager.bot = bot_instance
+    return manager
 
 
 @dataclass
@@ -102,8 +149,6 @@ def simple_commands_game(
 
     game = SimpleCommandsGame(command_handler=handler)
     game.bot = mock_bot
-    game.cache_manager = mock_cache_manager
-    game.user_manager = mock_user_manager
     game.api = mock_api
 
     return game
@@ -131,8 +176,6 @@ def collectors_game(
 
     game = CollectorsGame(command_handler=handler)
     game.bot = mock_bot
-    game.cache_manager = mock_cache_manager
-    game.user_manager = mock_user_manager
     game.api = mock_api
 
     return game
