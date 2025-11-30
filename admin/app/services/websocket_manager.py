@@ -2,8 +2,9 @@ import asyncio
 import logging
 from typing import Any
 
-from app.ssh_client import AsyncSSHWrapper
 from fastapi import WebSocket, WebSocketDisconnect
+
+from app.services.ssh_client import AsyncSSHWrapper
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +79,6 @@ class WebSocketManager:
                             await websocket.send_text(line)
                         except Exception:
                             break
-
 
         except (WebSocketDisconnect, ConnectionError):
             logger.info(f"WebSocket {connection_id} disconnected")

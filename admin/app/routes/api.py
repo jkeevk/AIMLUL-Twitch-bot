@@ -3,15 +3,16 @@ import time
 import uuid
 from datetime import datetime
 
+from fastapi import APIRouter, Depends, Form, Request, WebSocket, WebSocketDisconnect, status
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+
 from app.config import settings
 from app.dependencies import get_client_ip, get_current_user_optional, verify_token
 from app.models import SSHConnectionRequest
 from app.security import create_token, login_attempts
-from app.ssh_client import AsyncSSHWrapper
-from app.templates import templates
-from app.websocket_manager import websocket_manager
-from fastapi import APIRouter, Depends, Form, Request, WebSocket, WebSocketDisconnect, status
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from app.services.websocket_manager import websocket_manager
+from app.services.ssh_client import AsyncSSHWrapper
+from app.utils.jinja_setup import templates
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -277,6 +278,7 @@ async def websocket_logs(websocket: WebSocket) -> None:
             await websocket.close()
         except Exception:
             pass
+
 
 @router.get("/health")  # type: ignore[misc]
 async def health_check() -> JSONResponse:
