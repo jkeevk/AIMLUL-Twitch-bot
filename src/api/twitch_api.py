@@ -66,6 +66,51 @@ class TwitchAPI:
         masked_token = f"{bot_token[:5]}...{bot_token[-5:]}" if bot_token else "empty"
         self.logger.info(f"TwitchAPI headers refreshed. Token: {masked_token}")
 
+    async def get_chatters(self, channel_name: str, broadcaster_id: str | None = None) -> list[dict[str, str]]:
+        """
+        Get list of chatters using Twitch Helix API.
+
+        Args:
+            channel_name: The name of the channel to get chatters for.
+            broadcaster_id: Twitch channel ID.
+
+        Returns:
+            List of dicts with user info: [{"user_name": "...", "user_id": "..."}]
+        """
+        await self._ensure_session()
+        if not broadcaster_id:
+            broadcaster_id = await self._get_user_id(channel_name)
+
+        if not broadcaster_id:
+            self.logger.warning(f"Broadcaster not found: {channel_name}")
+            return []
+
+        url = f"{self.base_url}/chat/chatters"
+        params = {
+            "broadcaster_id": broadcaster_id,
+            "moderator_id": self.bot.user_id,
+        }
+
+        headers = {
+            "Authorization": f"Bearer {self.bot_token()}",
+            "Client-ID": self.bot.token_manager.tokens["BOT_TOKEN"].client_id,
+        }
+
+        assert self.session is not None
+        try:
+            async with self.session.get(url, params=params, headers=headers) as resp:
+                if resp.status != 200:
+                    text = await resp.text()
+                    self.logger.error(f"Failed to fetch chatters: {resp.status} {text}")
+                    return []
+
+                data = await resp.json()
+                raw_chatters = data.get("data", [])
+                return [{"user_name": c["user_name"], "user_id": c["user_id"]} for c in raw_chatters]
+        except Exception as e:
+            self.logger.error(f"Error fetching chatters: {e}", exc_info=True)
+            return []
+
     async def timeout_user(self, user_id: str, channel_name: str, duration: int, reason: str) -> tuple[int, Any]:
         """
         Issue timeout to a user in specified channel.
