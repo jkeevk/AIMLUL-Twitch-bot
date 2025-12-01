@@ -2,6 +2,8 @@ import logging
 import time
 from typing import Any
 
+from src.commands.games.beer_barrel import BeerBarrelGame
+from src.commands.games.beer_challenge import BeerChallengeGame
 from src.commands.games.collectors_game import CollectorsGame
 from src.commands.games.simple_commands import SimpleCommandsGame
 from src.commands.games.twenty_one import TwentyOneGame
@@ -35,6 +37,8 @@ class CommandHandler:
         self.collectors_game = CollectorsGame(self)
         self.twenty_one_game = TwentyOneGame(self)
         self.simple_commands_game = SimpleCommandsGame(self)
+        self.beer_barrel_game = BeerBarrelGame(self)
+        self.beer_challenge_game = BeerChallengeGame(self)
 
     @staticmethod
     def get_current_time() -> float:
@@ -66,8 +70,16 @@ class CommandHandler:
         """Handle test barrel command."""
         await self.simple_commands_game.handle_test_barrel_command(ctx)
 
+    async def handle_beer_barrel(self, user_name: str, channel_name: str) -> None:
+        """Handle beer barrel command."""
+        await self.beer_barrel_game.handle_beer_barrel_command(user_name, channel_name)
+
+    async def handle_beer_challenge(self, user_name: str, user_input: str, channel_name: str) -> None:
+        """Handle beer challenge command."""
+        await self.beer_challenge_game.handle_beer_challenge_command(user_name, user_input, channel_name)
+
     async def handle_twenty_one(self, ctx: Any) -> None:
-        """Handle main twenty-one game command."""
+        """Handle twenty-one game command."""
         await self.twenty_one_game.handle_command(ctx)
 
     async def handle_me(self, ctx: Any) -> None:
