@@ -36,6 +36,15 @@ class WebSocketManager:
         self.active_connections.pop(connection_id, None)
         self.processes.pop(connection_id, None)
 
+    async def _send_keepalive(self, websocket: WebSocket, interval: float = 10.0) -> None:
+        """Send periodic empty messages to keep WebSocket alive."""
+        try:
+            while True:
+                await asyncio.sleep(interval)
+                await websocket.send_text("")  # ping
+        except (WebSocketDisconnect, asyncio.CancelledError):
+            pass
+
     async def stream_logs(self, connection_id: str, data: dict[str, Any]) -> None:
         """
         Stream Docker container logs via WebSocket.
@@ -50,12 +59,15 @@ class WebSocketManager:
         websocket = self.active_connections.get(connection_id)
         if not websocket:
             return
+
         ip = data["ip"]
         user = data["username"]
         pwd = data.get("password", "")
         container = data["container"]
 
         process: Any = None
+        keepalive_task: asyncio.Task[None] | None = None
+
         try:
             async with AsyncSSHWrapper(ip, user, pwd) as ssh:
                 history = await ssh.exec(f"docker logs --tail 50 {container} 2>&1")
@@ -69,19 +81,22 @@ class WebSocketManager:
                     if stdout is None:
                         logger.error(f"No stdout for process {connection_id}")
                         return
+
+                    keepalive_task = asyncio.create_task(self._send_keepalive(websocket))
+
                     while True:
                         try:
-                            line = await asyncio.wait_for(process.stdout.readline(), timeout=1.0)
+                            line_bytes = await asyncio.wait_for(stdout.readline(), timeout=1.0)
                         except TimeoutError:
-                            await websocket.send_text("")
                             continue
 
-                        if not line:
+                        if not line_bytes:
                             break
 
+                        line = line_bytes.rstrip()
                         try:
                             await websocket.send_text(line)
-                        except Exception:
+                        except WebSocketDisconnect:
                             break
 
         except (WebSocketDisconnect, ConnectionError):
@@ -103,6 +118,14 @@ class WebSocketManager:
                     await asyncio.shield(asyncio.wait_for(process.wait(), timeout=2))
                 except Exception:
                     pass
+
+            if keepalive_task:
+                keepalive_task.cancel()
+                try:
+                    await keepalive_task
+                except Exception:
+                    pass
+
             self.disconnect(connection_id)
             if websocket:
                 try:
