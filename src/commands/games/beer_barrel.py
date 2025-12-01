@@ -1,12 +1,13 @@
 import asyncio
 import random
-from src.commands.models.chatters import ChatterData
-from typing import Optional
 
 from twitchio.ext.commands import Context
+
 from src.commands.games.base_game import BaseGame
+from src.commands.models.chatters import ChatterData
 
 MAX_MESSAGE_LENGTH = 255
+
 
 class BeerBarrelGame(BaseGame):
     """Handles the Beer Barrel reward without requiring a chat context."""
@@ -23,12 +24,7 @@ class BeerBarrelGame(BaseGame):
             if self.cache_manager.should_update_cache() or len(self.cache_manager.get_cached_chatters()) < 50:
                 chatters = await self.api.get_chatters(channel_name)
                 normalized: list[ChatterData] = [
-                    ChatterData(
-                        id=c["user_id"],
-                        name=c["user_name"],
-                        display_name=c["user_name"]
-                    )
-                    for c in chatters
+                    ChatterData(id=c["user_id"], name=c["user_name"], display_name=c["user_name"]) for c in chatters
                 ]
                 self.cache_manager._cached_chatters = self.cache_manager.filter_chatters(normalized)
 
@@ -42,7 +38,7 @@ class BeerBarrelGame(BaseGame):
             selected_count = min(50, len(valid_chatters))
             targets = random.sample(valid_chatters, selected_count)
 
-            async def process_timeout(target: ChatterData) -> Optional[str]:
+            async def process_timeout(target: ChatterData) -> str | None:
                 try:
                     if not target["id"]:
                         return None
@@ -68,15 +64,15 @@ class BeerBarrelGame(BaseGame):
                 await self.bot.join_channels([channel_name])
                 channel = self.bot.get_channel(channel_name)
 
-            ascii_art_start = ("⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠟⠉⠀⠀⠀⠉⠻⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣿⣿⣿⡏⠀⠀⠀⠀⠀⠀⠀⠸⠉⠻⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⡿⢿⣿⡿⠓⠀⠀⡎⠉⠉⢢⠀⠀⠀⠀⠛⢿⠋⢻⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣤⣤⣿⡀⠀⠀⠀⠓⠴⠃⣼⠀⠀⠀⠀⠀⢸⣿⠁⣸⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⠀⢹⣿⠒⠒⠒⠒⠒⠚⢿⠀⣤⣄⠀⢸⣛⣛⠛⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣶⠛⣿⡄⠀⣀⠀⠀⣀⣼⠀⣧⡈⠷⢾⣿⣿⡇⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⢸⡏⠀⠀⡏⢿⣀⣿⠁⠀⢸⣿⣿⡇⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⢸⡇⠀⠀⡇⠀⠉⣿⠀⠀⢸⣿⣿⡇⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⢸⡇⠀⠀⡇⠀⠀⣿⠀⠀⢸⣋⣉⣁⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⢸⡇⠀⠀⡇⠀⠀⣿⠀⠀⢸⣿⣿⣿⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⢸⡇⠀⠀⡇⠀⠀⣿⠀⠀⢸⣿⣿⣿⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⢸⣇⠀⠀⣧⠀⠀⣿⡀⠀⢸⣿⣿⣿⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣿⣿⣿⣇⠀⠁⠀⠀⠈⠀⠀⠈⠀⢀⣾⣿⣿⣿⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿")
+            ascii_art_start = "⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠟⠉⠀⠀⠀⠉⠻⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣿⣿⣿⡏⠀⠀⠀⠀⠀⠀⠀⠸⠉⠻⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⡿⢿⣿⡿⠓⠀⠀⡎⠉⠉⢢⠀⠀⠀⠀⠛⢿⠋⢻⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣤⣤⣿⡀⠀⠀⠀⠓⠴⠃⣼⠀⠀⠀⠀⠀⢸⣿⠁⣸⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⠀⢹⣿⠒⠒⠒⠒⠒⠚⢿⠀⣤⣄⠀⢸⣛⣛⠛⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣶⠛⣿⡄⠀⣀⠀⠀⣀⣼⠀⣧⡈⠷⢾⣿⣿⡇⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⢸⡏⠀⠀⡏⢿⣀⣿⠁⠀⢸⣿⣿⡇⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⢸⡇⠀⠀⡇⠀⠉⣿⠀⠀⢸⣿⣿⡇⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⢸⡇⠀⠀⡇⠀⠀⣿⠀⠀⢸⣋⣉⣁⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⢸⡇⠀⠀⡇⠀⠀⣿⠀⠀⢸⣿⣿⣿⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⢸⡇⠀⠀⡇⠀⠀⣿⠀⠀⢸⣿⣿⣿⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⢸⣇⠀⠀⣧⠀⠀⣿⡀⠀⢸⣿⣿⣿⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣿⣿⣿⣇⠀⠁⠀⠀⠈⠀⠀⠈⠀⢀⣾⣿⣿⣿⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿"  # noqa: E501
             await channel.send(ascii_art_start)
-            await channel.send(f"catLicks ПРИГОТОВИЛИСЬ! ДО ВСКРЫТИЯ ПИВНОЙ КЕГИ 30 СЕКУНД! catLicks")
+            await channel.send("catLicks ПРИГОТОВИЛИСЬ! ДО ВСКРЫТИЯ ПИВНОЙ КЕГИ 30 СЕКУНД! catLicks")
             await asyncio.sleep(60)
-            await channel.send(f"catLicks ГОТОВЬТЕ КРУЖКИ! 10 СЕКУНД catLicks")
+            await channel.send("catLicks ГОТОВЬТЕ КРУЖКИ! 10 СЕКУНД catLicks")
             await asyncio.sleep(10)
-            await channel.send(f"Кто тащил кегу??? Wigglecat Прячься, сейчас пизданёт KabanRunZaPivom")
+            await channel.send("Кто тащил кегу??? Wigglecat Прячься, сейчас пизданёт KabanRunZaPivom")
             await asyncio.sleep(2)
-            ascii_art_end = ("⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡿⠟⠛⠛⠋⠋⠙⠻⠛⠿⣿⣿⣿⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⠟⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠹⢿⣿⣿⣿⣿⣿⣿ ⣿⣿⠿⠛⠁⠀⠀⠀⠀⢀⣠⣠⠄⢀⣄⣀⠀⣤⣴⣆⠀⠀⠀⣼⣿⣿⣿⣿⣿⣿ ⠟⠋⢀⠀⢠⡗⠂⠀⠀⢂⠎⣠⠶⢿⣿⣿⣿⣿⣿⣿⣷⣾⣿⣿⣿⣿⣿⣿⣿⣿ ⠀⢠⣦⠿⠛⠀⠀⡄⠀⠈⠀⠉⠀⠘⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿ ⠀⠀⠉⠀⠀⠀⠀⠁⠀⠀⠀⢀⣠⣴⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿ ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠈⣼⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿ ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠙⠻⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿ ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠙⠿⢿⣿⣿⣿⣿⣿⣿⣿⣿⠿⠋ ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⣀⣉⣩⣩⣄⣀⣠⣤⣤ ⠀⠀⠀⠀⠀⠀⢠⣼⣦⣦⣄⠀⠀⠰⢦⣤⣤⣀⣀⣀⣀⣀⣀⣚⣛⣛⣻⣻⣿⣿")
+            ascii_art_end = "⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡿⠟⠛⠛⠋⠋⠙⠻⠛⠿⣿⣿⣿⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⠟⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠹⢿⣿⣿⣿⣿⣿⣿ ⣿⣿⠿⠛⠁⠀⠀⠀⠀⢀⣠⣠⠄⢀⣄⣀⠀⣤⣴⣆⠀⠀⠀⣼⣿⣿⣿⣿⣿⣿ ⠟⠋⢀⠀⢠⡗⠂⠀⠀⢂⠎⣠⠶⢿⣿⣿⣿⣿⣿⣿⣷⣾⣿⣿⣿⣿⣿⣿⣿⣿ ⠀⢠⣦⠿⠛⠀⠀⡄⠀⠈⠀⠉⠀⠘⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿ ⠀⠀⠉⠀⠀⠀⠀⠁⠀⠀⠀⢀⣠⣴⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿ ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠈⣼⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿ ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠙⠻⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿ ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠙⠿⢿⣿⣿⣿⣿⣿⣿⣿⣿⠿⠋ ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⣀⣉⣩⣩⣄⣀⣠⣤⣤ ⠀⠀⠀⠀⠀⠀⢠⣼⣦⣦⣄⠀⠀⠰⢦⣤⣤⣀⣀⣀⣀⣀⣀⣚⣛⣛⣻⣻⣿⣿"  # noqa: E501
             await asyncio.sleep(2)
             await channel.send(ascii_art_end)
 
@@ -84,7 +80,7 @@ class BeerBarrelGame(BaseGame):
 
             batch_size = 5
             for i in range(0, len(targets), batch_size):
-                batch = targets[i:i + batch_size]
+                batch = targets[i : i + batch_size]
                 tasks = [process_timeout(target) for target in batch]
                 results = await asyncio.gather(*tasks)
                 for result in results:

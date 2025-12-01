@@ -1,5 +1,7 @@
 import random
+
 from twitchio.ext.commands import Context
+
 from src.commands.games.base_game import BaseGame
 from src.commands.models.chatters import ChatterData
 
@@ -27,11 +29,7 @@ class BeerChallengeGame(BaseGame):
                 self.logger.error(f"Invalid input: {user_input}")
                 return
 
-            user_obj = ChatterData(
-                id="",
-                name=user_name,
-                display_name=user_name
-            )
+            user_obj = ChatterData(id="", name=user_name, display_name=user_name)
             amount = max(1, min(int(user_input), 20))
             success_chance = self.get_success_chance(amount)
             roll = random.randint(1, 100)
@@ -55,7 +53,7 @@ class BeerChallengeGame(BaseGame):
                 f"@{user_name} ушел в пивную кому ystal",
                 f"@{user_name} переоценил свои силы, кто убирать будет? CLEAN",
                 f"@{user_name} обблевал весь пол и лежит в луже PUKERS",
-                f"@{user_name} обблевал весь пол и пополз откисать на диван PUKERS"
+                f"@{user_name} обблевал весь пол и пополз откисать на диван PUKERS",
             ]
             msg = random.choice(fail_msgs)
             await channel.send(msg)
@@ -67,10 +65,7 @@ class BeerChallengeGame(BaseGame):
             target_id = await self.user_manager.get_user_id(user_name)
             if target_id:
                 await self.api.timeout_user(
-                    user_id=target_id,
-                    channel_name=channel_name,
-                    duration=60,
-                    reason="Испытание пивом — провал"
+                    user_id=target_id, channel_name=channel_name, duration=60, reason="Испытание пивом — провал"
                 )
 
         except Exception as e:
