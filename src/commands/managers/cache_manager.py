@@ -3,9 +3,9 @@ import logging
 import time
 from typing import Any
 
-from twitchio import Chatter, PartialUser
+from twitchio import Chatter
 
-from src.commands.permissions import is_privileged
+from src.commands.permissions import PRIVILEGED_USERS, is_privileged
 
 
 class UserIDCache:
@@ -96,10 +96,14 @@ class CacheManager:
         Returns:
             True if user can be targeted, False otherwise
         """
-        if hasattr(chatter, "name") and chatter.name.lower() == self.bot_nick.lower():
-            return False
-        if isinstance(chatter, PartialUser):
-            return True
+        if isinstance(chatter, dict) and "name" in chatter:
+            name = chatter["name"].lower()
+            return name != self.bot_nick.lower() and name not in (u.lower() for u in PRIVILEGED_USERS)
+
+        if hasattr(chatter, "name"):
+            name = chatter.name.lower()
+            return name != self.bot_nick.lower() and name not in (u.lower() for u in PRIVILEGED_USERS)
+
         if isinstance(chatter, Chatter):
             return not is_privileged(chatter)
         return False
