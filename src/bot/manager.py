@@ -239,8 +239,26 @@ class BotManager:
         try:
             if not getattr(self.bot, "is_connected", False):
                 return False
+
+            expected_channels = self.bot.config.get("channels", [])
+
+            if not expected_channels:
+                logger.error("No channels configured in TwitchBot, but connection is up.")
+                return False
+
+            expected = {c.lower() for c in expected_channels}
+            actual = {c.name.lower() for c in self.bot.connected_channels}
+
+            missing = expected - actual
+
+            if missing:
+                logger.warning(f"Bot connected but failed to join channels: {missing}")
+                return False
+
             return await self._check_websocket()
+
         except Exception:
+            logger.exception("Error during _check_bot_health")
             return False
 
     async def _check_websocket(self) -> bool:

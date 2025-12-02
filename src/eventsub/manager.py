@@ -42,7 +42,12 @@ class EventSubManager:
         try:
             self.client = eventsub.EventSubWSClient(self.bot)
             streamer_token = await self.bot.token_manager.get_streamer_token()
-            channel_name = self.bot.config["channels"][0]
+            channel_list = self.bot.config["channels"]
+
+            if not channel_list:
+                logger.warning("Channel list is empty in config. EventSub setup skipped.")
+                return
+            channel_name = channel_list[0]
 
             users = await self.bot.fetch_users(names=[channel_name])
             if not users:
