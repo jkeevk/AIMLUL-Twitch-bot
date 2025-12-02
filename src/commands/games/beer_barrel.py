@@ -4,7 +4,6 @@ import random
 from twitchio.ext.commands import Context
 
 from src.commands.games.base_game import BaseGame
-from src.commands.models.chatters import ChatterData
 
 MAX_MESSAGE_LENGTH = 255
 
@@ -23,8 +22,8 @@ class BeerBarrelGame(BaseGame):
         try:
             if self.cache_manager.should_update_cache() or len(self.cache_manager.get_cached_chatters()) < 50:
                 chatters = await self.api.get_chatters(channel_name)
-                normalized: list[ChatterData] = [
-                    ChatterData(id=c["user_id"], name=c["user_name"], display_name=c["user_name"]) for c in chatters
+                normalized: list[dict[str, str]] = [
+                    {"id": c["user_id"], "name": c["user_name"], "display_name": c["user_name"]} for c in chatters
                 ]
                 self.cache_manager._cached_chatters = self.cache_manager.filter_chatters(normalized)
 
@@ -38,25 +37,27 @@ class BeerBarrelGame(BaseGame):
             selected_count = min(50, len(valid_chatters))
             targets = random.sample(valid_chatters, selected_count)
 
-            async def process_timeout(target: ChatterData) -> str | None:
+            async def process_timeout(target: dict[str, str | None]) -> str | None:
+                target_id = target.get("id")
+                target_name = target.get("name")
                 try:
-                    if not target["id"]:
+                    if not target_id or not target_name:
                         return None
 
                     status, response = await self.api.timeout_user(
-                        user_id=target["id"],
+                        user_id=target_id,
                         channel_name=channel_name,
                         duration=600,
                         reason="Пивная кома",
                     )
 
                     if status == 200:
-                        return target["name"]
+                        return str(target_name)
                     else:
-                        self.logger.warning(f"Failed to timeout {target["name"]}: status={status}")
+                        self.logger.warning(f"Failed to timeout {target_name}: status={status}")
                         return None
                 except Exception as e:
-                    self.logger.error(f"Error processing {target["name"]}: {e}")
+                    self.logger.error(f"Error processing {target_name or 'unknown'}: {e}")
                     return None
 
             channel = self.bot.get_channel(channel_name)
