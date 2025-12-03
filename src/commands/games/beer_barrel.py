@@ -1,5 +1,6 @@
 import asyncio
 import random
+import time
 
 from twitchio.ext.commands import Context
 
@@ -20,15 +21,15 @@ class BeerBarrelGame(BaseGame):
             channel_name: Name of the channel where the reward was triggered.
         """
         try:
-            if self.cache_manager.should_update_cache() or len(self.cache_manager.get_cached_chatters()) < 50:
+            if self.cache_manager.should_update_cache():
                 chatters = await self.api.get_chatters(channel_name)
                 normalized: list[dict[str, str]] = [
                     {"id": c["user_id"], "name": c["user_name"], "display_name": c["user_name"]} for c in chatters
                 ]
                 self.cache_manager._cached_chatters = self.cache_manager.filter_chatters(normalized)
-
+                self.cache_manager._last_cache_update = time.time()
             valid_chatters = self.cache_manager.get_cached_chatters()
-            self.logger.info(valid_chatters)
+            random.shuffle(valid_chatters)
 
             if not valid_chatters:
                 self.logger.warning("No suitable users for barrel command")
@@ -67,7 +68,7 @@ class BeerBarrelGame(BaseGame):
 
             ascii_art_start = "⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠟⠉⠀⠀⠀⠉⠻⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣿⣿⣿⡏⠀⠀⠀⠀⠀⠀⠀⠸⠉⠻⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⡿⢿⣿⡿⠓⠀⠀⡎⠉⠉⢢⠀⠀⠀⠀⠛⢿⠋⢻⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣤⣤⣿⡀⠀⠀⠀⠓⠴⠃⣼⠀⠀⠀⠀⠀⢸⣿⠁⣸⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⠀⢹⣿⠒⠒⠒⠒⠒⠚⢿⠀⣤⣄⠀⢸⣛⣛⠛⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣶⠛⣿⡄⠀⣀⠀⠀⣀⣼⠀⣧⡈⠷⢾⣿⣿⡇⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⢸⡏⠀⠀⡏⢿⣀⣿⠁⠀⢸⣿⣿⡇⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⢸⡇⠀⠀⡇⠀⠉⣿⠀⠀⢸⣿⣿⡇⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⢸⡇⠀⠀⡇⠀⠀⣿⠀⠀⢸⣋⣉⣁⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⢸⡇⠀⠀⡇⠀⠀⣿⠀⠀⢸⣿⣿⣿⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⢸⡇⠀⠀⡇⠀⠀⣿⠀⠀⢸⣿⣿⣿⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⢸⣇⠀⠀⣧⠀⠀⣿⡀⠀⢸⣿⣿⣿⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣿⣿⣿⣇⠀⠁⠀⠀⠈⠀⠀⠈⠀⢀⣾⣿⣿⣿⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿"  # noqa: E501
             await channel.send(ascii_art_start)
-            await channel.send("catLicks ПРИГОТОВИЛИСЬ! ДО ВСКРЫТИЯ ПИВНОЙ КЕГИ 30 СЕКУНД! catLicks")
+            await channel.send("catLicks ПРИГОТОВИЛИСЬ! ДО ВСКРЫТИЯ ПИВНОЙ КЕГИ 60 СЕКУНД! catLicks")
             await asyncio.sleep(60)
             await channel.send("catLicks ГОТОВЬТЕ КРУЖКИ! 10 СЕКУНД catLicks")
             await asyncio.sleep(10)
@@ -79,7 +80,7 @@ class BeerBarrelGame(BaseGame):
 
             punished_users = []
 
-            batch_size = 5
+            batch_size = 10
             for i in range(0, len(targets), batch_size):
                 batch = targets[i : i + batch_size]
                 tasks = [process_timeout(target) for target in batch]
