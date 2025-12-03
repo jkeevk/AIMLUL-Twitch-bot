@@ -196,6 +196,8 @@ class BotManager:
                 await self.token_manager.refresh_access_token("BOT_TOKEN")
                 if self.token_manager.has_streamer_token():
                     await self.token_manager.refresh_access_token("STREAMER_TOKEN")
+                if self.bot:
+                    await self.bot.api.refresh_headers()
                 logger.info("Tokens refreshed")
 
             except asyncio.CancelledError:

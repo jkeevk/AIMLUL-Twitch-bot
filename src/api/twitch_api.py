@@ -86,19 +86,11 @@ class TwitchAPI:
             return []
 
         url = f"{self.base_url}/chat/chatters"
-        params = {
-            "broadcaster_id": broadcaster_id,
-            "moderator_id": self.bot.user_id,
-        }
-
-        headers = {
-            "Authorization": f"Bearer {self.bot_token()}",
-            "Client-ID": self.bot.token_manager.tokens["BOT_TOKEN"].client_id,
-        }
+        params = {"broadcaster_id": broadcaster_id, "moderator_id": self.bot.user_id, "first": 1000}
 
         assert self.session is not None
         try:
-            async with self.session.get(url, params=params, headers=headers) as resp:
+            async with self.session.get(url, params=params, headers=self.headers) as resp:
                 if resp.status != 200:
                     text = await resp.text()
                     self.logger.error(f"Failed to fetch chatters: {resp.status} {text}")
