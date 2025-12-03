@@ -38,10 +38,17 @@ class SimpleCommandsGame(BaseGame):
                 return
 
             target_chatter = random.choice(cached_chatters)
-            target_id = await self.user_manager.get_user_id(target_chatter.name, target_chatter)
+            target_name = (
+                target_chatter["name"] if isinstance(target_chatter, dict) else getattr(target_chatter, "name", None)
+            )
+
+            if not target_name:
+                self.logger.error("Invalid chatter object: missing name")
+                return
+            target_id = await self.user_manager.get_user_id(target_name, target_chatter)
 
             if not target_id:
-                self.logger.error(f"Failed to get user ID: {target_chatter.name}")
+                self.logger.error(f"Failed to get user ID: {target_name}")
                 return
 
             timeout_task = asyncio.create_task(
@@ -53,12 +60,12 @@ class SimpleCommandsGame(BaseGame):
                 )
             )
 
-            await ctx.send(f"{ctx.author.name} бьёт дрыном по голове {target_chatter.name} MODS")
+            await ctx.send(f"{ctx.author.name} бьёт дрыном по голове {target_name} MODS")
             status, response = await timeout_task
 
             if status == 200:
                 self.update_cooldown("club")
-                self.logger.info(f"Club applied to {target_chatter.name}")
+                self.logger.info(f"Club applied to {target_name}")
                 asyncio.create_task(self.cache_manager.update_chatters_cache(ctx.channel, self.bot.nick))
             else:
                 self.logger.warning(f"Timeout failed: {status}")
