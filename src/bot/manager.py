@@ -4,6 +4,7 @@ import logging
 from aiohttp import web
 
 from src.bot.twitch_bot import TwitchBot
+from src.core.config_loader import load_settings
 from src.utils.token_manager import TokenManager
 
 logger = logging.getLogger(__name__)
@@ -185,20 +186,31 @@ class BotManager:
         Args:
             None.
         """
-        delay: int = 7200
         while self._running:
+            settings = load_settings()
+            delay = settings.get("refresh_token_delay_time", 7200)
+
             try:
-                if self.bot and "refresh_token_delay_time" in self.bot.config:
-                    delay = int(self.bot.config["refresh_token_delay_time"])
                 await asyncio.sleep(delay)
 
-                logger.info("Refreshing tokens...")
                 await self.token_manager.refresh_access_token("BOT_TOKEN")
+                bot_preview = self.token_manager.tokens["BOT_TOKEN"].access_token
+                bot_preview = f"{bot_preview[:5]}...{bot_preview[-5:]}" if bot_preview else "empty"
+
                 if self.token_manager.has_streamer_token():
                     await self.token_manager.refresh_access_token("STREAMER_TOKEN")
-                if self.bot:
+                    streamer_preview = self.token_manager.tokens["STREAMER_TOKEN"].access_token
+                    streamer_preview = (
+                        f"{streamer_preview[:5]}...{streamer_preview[-5:]}" if streamer_preview else "empty"
+                    )
+                    logger.info(
+                        f"[Planned]: Tokens refreshed. BOT_TOKEN={bot_preview}, STREAMER_TOKEN={streamer_preview}"
+                    )
+                else:
+                    logger.info(f"[Planned]: Tokens refreshed. BOT_TOKEN={bot_preview}")
+
+                if self.bot and hasattr(self.bot, "api") and self.bot.api:
                     await self.bot.api.refresh_headers()
-                logger.info("Tokens refreshed")
 
             except asyncio.CancelledError:
                 return
