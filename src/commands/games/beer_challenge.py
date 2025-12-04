@@ -24,13 +24,15 @@ class BeerChallengeGame(BaseGame):
             channel = self.bot.get_channel(channel_name)
 
         try:
-            if not user_input.isdigit():
+            cleaned = user_input.strip().split()[0]
+
+            if not cleaned.isdigit():
                 await channel.send(f"@{user_name}, че пишешь то? Требуется число от 1 до 20 GAGAGA")
                 self.logger.error(f"Invalid input: {user_input}")
                 return
 
             user_obj = ChatterData(id="", name=user_name, display_name=user_name)
-            amount = max(1, min(int(user_input), 20))
+            amount = max(1, min(int(cleaned), 20))
             success_chance = self.get_success_chance(amount)
             roll = random.randint(1, 100)
 
@@ -74,7 +76,7 @@ class BeerChallengeGame(BaseGame):
     @staticmethod
     def get_success_chance(amount: int) -> int:
         """Return success chance based on input amount."""
-        return int(max(1, round(90 * (1 - (amount - 1) / 19) ** 1.5)))
+        return int(max(1, round(70 * (1 - (amount - 2) / 19) ** 1.1)))
 
     async def handle_command(self, ctx: Context) -> None:
         """Not used for simple commands."""
