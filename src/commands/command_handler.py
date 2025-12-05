@@ -66,9 +66,13 @@ class CommandHandler:
         """Handle butt command."""
         await self.simple_commands_game.handle_butt_command(ctx)
 
-    async def handle_barrel(self, ctx: Any) -> None:
-        """Handle test barrel command."""
-        await self.simple_commands_game.handle_test_barrel_command(ctx)
+    async def handle_trash_barrel(self, user_name: str, channel_name: str) -> None:
+        """Handle trash barrel command."""
+        await self.beer_barrel_game.handle_trash_command(user_name, channel_name)
+
+    async def handle_kaban_barrel(self, user_name: str, channel_name: str) -> None:
+        """Handle kaban barrel command."""
+        await self.beer_barrel_game.handle_kaban_command(user_name, channel_name)
 
     async def handle_beer_barrel(self, user_name: str, channel_name: str) -> None:
         """Handle beer barrel command."""
