@@ -137,13 +137,6 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
         if self.active:
             await self.command_handler.handle_club(ctx)
 
-    @commands.command(name="бочка")
-    async def test_barrel(self, ctx: commands.Context) -> None:
-        """Handle the test barrel command (admin only)."""
-        if not is_admin(self, ctx.author.name):
-            return
-        await self.command_handler.handle_barrel(ctx)
-
     @commands.command(name="я")
     async def me(self, ctx: commands.Context) -> None:
         """Handle the me command to show user stats."""
