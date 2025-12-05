@@ -23,12 +23,13 @@ logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
+async def lifespan(_: FastAPI) -> AsyncGenerator[None]:
     """
     Manage application lifecycle events.
 
     Args:
-        app (FastAPI): FastAPI application instance.
+        _ (FastAPI): FastAPI application instance (not used).
+
     """
     logger.info("Docker Container Manager starting up...")
 
@@ -64,28 +65,6 @@ app = FastAPI(
 
 app.mount("/static", StaticFiles(directory=static_directory), name="static")
 app.include_router(router)
-
-
-@app.on_event("startup")
-async def startup_event() -> None:
-    """Log FastAPI startup."""
-    logger.info("Starting FastAPI app...")
-
-
-@app.on_event("shutdown")
-async def shutdown_event() -> None:
-    """Close all WebSocket and SSH connections on shutdown."""
-    logger.info("Shutting down FastAPI app...")
-
-    try:
-        await asyncio.wait_for(websocket_manager.cleanup(), timeout=5)
-    except TimeoutError:
-        logger.warning("WebSocket cleanup timeout!")
-
-    try:
-        await asyncio.wait_for(ssh_pool.close_all(), timeout=5)
-    except TimeoutError:
-        logger.warning("SSH pool cleanup timeout!")
 
 
 if __name__ == "__main__":
