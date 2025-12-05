@@ -1,6 +1,6 @@
 import logging
 
-from pydantic import validator
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
 logger = logging.getLogger(__name__)
@@ -13,8 +13,9 @@ class Settings(BaseSettings):  # type: ignore[misc]
     Attributes:
         auth_username (str): Admin username for authentication.
         auth_password (str): Admin password for authentication.
-        password_attempts_limit (int): Maximum login attempts before lockout.
-        session_timeout_minutes (int): Session timeout in minutes.
+        max_login_attempts (int): Maximum login attempts before lockout.
+        session_duration_minutes (int): Session duration in minutes.
+        lockout_duration_minutes: Lockout duration in minutes.
         default_ssh_host (str): Default SSH host.
         default_ssh_username (str): Default SSH username.
         default_ssh_password (str): Default SSH password.
@@ -25,8 +26,9 @@ class Settings(BaseSettings):  # type: ignore[misc]
 
     auth_username: str = "admin"
     auth_password: str = "password"
-    password_attempts_limit: int = 5
-    session_timeout_minutes: int = 15
+    max_login_attempts: int = 5
+    session_duration_minutes: int = 30
+    lockout_duration_minutes: int = 15
 
     default_ssh_host: str = "localhost"
     default_ssh_username: str = "root"
@@ -43,7 +45,7 @@ class Settings(BaseSettings):  # type: ignore[misc]
         env_file = ".env"
         extra = "ignore"
 
-    @validator("secret_key")
+    @field_validator("secret_key")
     def validate_secret_key(cls, v: str) -> str:
         """
         Warn if the default secret key is used.
