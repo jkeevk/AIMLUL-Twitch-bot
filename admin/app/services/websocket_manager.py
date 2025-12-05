@@ -1,47 +1,57 @@
 import asyncio
 import logging
-from asyncio import StreamReader
 from typing import Any
 
+import asyncssh
 from app.services.ssh_client import AsyncSSHWrapper
+from asyncssh import SSHClientProcess
 from fastapi import WebSocket, WebSocketDisconnect
 
 logger = logging.getLogger(__name__)
 
 
 class WebSocketManager:
-    """Manage WebSocket connections and their metadata."""
+    """Manage WebSocket connections and their associated SSH processes."""
 
     def __init__(self) -> None:
         """Initialize WebSocket manager."""
         self.active_connections: dict[str, WebSocket] = {}
-        self.processes: dict[str, Any] = {}
+        self.processes: dict[str, asyncssh.SSHClientProcess] = {}
 
     async def connect(self, websocket: WebSocket, connection_id: str) -> None:
-        """Register new WebSocket connection.
+        """
+        Register a new WebSocket connection.
 
         Args:
-            websocket: WebSocket connection.
-            connection_id: Unique connection identifier.
+            websocket: WebSocket connection instance.
+            connection_id: Unique identifier for this connection.
         """
         await websocket.accept()
         self.active_connections[connection_id] = websocket
 
     def disconnect(self, connection_id: str) -> None:
-        """Remove WebSocket connection.
+        """
+        Remove a WebSocket connection and its associated process.
 
         Args:
-            connection_id: Unique connection identifier.
+            connection_id: Unique identifier for this connection.
         """
         self.active_connections.pop(connection_id, None)
         self.processes.pop(connection_id, None)
 
-    async def _send_keepalive(self, websocket: WebSocket, interval: float = 10.0) -> None:
-        """Send periodic empty messages to keep WebSocket alive."""
+    @staticmethod
+    async def _send_keepalive(websocket: WebSocket, interval: float = 10.0) -> None:
+        """
+        Send periodic empty messages to keep the WebSocket connection alive.
+
+        Args:
+            websocket: WebSocket connection to ping.
+            interval: Time interval between pings in seconds.
+        """
         try:
             while True:
                 await asyncio.sleep(interval)
-                await websocket.send_text("")  # ping
+                await websocket.send_text("")  # keepalive ping
         except (WebSocketDisconnect, asyncio.CancelledError):
             pass
 
@@ -51,10 +61,11 @@ class WebSocketManager:
 
         Args:
             connection_id: Unique connection identifier.
-            data: Docker container logs data.
-
-        Returns:
-            Optional[Dict[str, Any]]: Connection info or None if not found.
+            data: Dictionary containing Docker container info:
+                  - ip: SSH host
+                  - username: SSH username
+                  - password: SSH password (optional)
+                  - container: Container name
         """
         websocket = self.active_connections.get(connection_id)
         if not websocket:
@@ -65,11 +76,12 @@ class WebSocketManager:
         pwd = data.get("password", "")
         container = data["container"]
 
-        process: Any = None
-        keepalive_task: asyncio.Task[None] | None = None
+        process: SSHClientProcess | None = None
+        keepalive_task: asyncio.Task[Any] | None = None
 
         try:
             async with AsyncSSHWrapper(ip, user, pwd) as ssh:
+                # Получаем последние 50 строк логов
                 history = await ssh.exec(f"docker logs --tail 50 {container} 2>&1")
                 await websocket.send_text(f"=== Last 50 lines ===\n{history}\n=== Live Stream Started ===\n")
 
@@ -77,7 +89,7 @@ class WebSocketManager:
                 async with ssh.get_process(cmd) as process:
                     self.processes[connection_id] = process
 
-                    stdout: StreamReader | None = getattr(process, "stdout", None)
+                    stdout = getattr(process, "stdout", None)
                     if stdout is None:
                         logger.error(f"No stdout for process {connection_id}")
                         return
@@ -96,42 +108,56 @@ class WebSocketManager:
                         line = line_bytes.rstrip()
                         try:
                             await websocket.send_text(line)
-                        except WebSocketDisconnect:
+                        except (WebSocketDisconnect, ConnectionError):
+                            logger.info(f"WebSocket {connection_id} disconnected during log streaming")
                             break
 
-        except (WebSocketDisconnect, ConnectionError):
+        except WebSocketDisconnect:
             logger.info(f"WebSocket {connection_id} disconnected")
+        except ConnectionError as e:
+            logger.warning(f"SSH connection error for {connection_id}: {e}")
+        except TimeoutError as e:
+            logger.warning(f"Timeout while reading logs for {connection_id}: {e}")
         except Exception as e:
-            logger.error(f"Log stream error {connection_id}: {e}")
+            logger.exception(f"Unexpected error while streaming logs {connection_id}: {e}")
             if websocket:
                 try:
                     await websocket.send_text(f"ERROR: {e}")
-                except Exception:
+                except (WebSocketDisconnect, ConnectionError):
                     pass
         finally:
             if process:
                 try:
                     process.kill()
-                except Exception:
+                except ProcessLookupError:
                     pass
+                except Exception as e:
+                    logger.warning(f"Error killing process {connection_id}: {e}")
+
                 try:
                     await asyncio.shield(asyncio.wait_for(process.wait(), timeout=2))
-                except Exception:
-                    pass
+                except TimeoutError:
+                    logger.warning(f"Process {connection_id} did not exit in time")
+                except Exception as e:
+                    logger.warning(f"Error waiting for process {connection_id}: {e}")
 
             if keepalive_task:
                 keepalive_task.cancel()
                 try:
                     await keepalive_task
-                except Exception:
+                except asyncio.CancelledError:
                     pass
+                except Exception as e:
+                    logger.warning(f"Keepalive task error for {connection_id}: {e}")
 
             self.disconnect(connection_id)
             if websocket:
                 try:
                     await websocket.close()
-                except Exception:
+                except (WebSocketDisconnect, ConnectionError):
                     pass
+                except Exception as e:
+                    logger.warning(f"Error closing websocket {connection_id}: {e}")
 
     async def cleanup(self) -> None:
         """Close all WebSocket connections and SSH processes during shutdown."""
@@ -142,11 +168,13 @@ class WebSocketManager:
                 try:
                     process.terminate()
                     await asyncio.wait_for(process.wait_closed(), timeout=3)
-                except Exception:
+                except Exception as e:
+                    logger.warning(f"Error terminating process {connection_id}: {e}")
                     pass
             try:
                 await websocket.close()
-            except Exception:
+            except Exception as e:
+                logger.warning(f"Error closing websocket {connection_id}: {e}")
                 pass
         self.active_connections.clear()
         self.processes.clear()
