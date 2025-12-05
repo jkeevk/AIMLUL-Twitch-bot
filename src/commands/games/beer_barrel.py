@@ -57,8 +57,8 @@ class BeerBarrelGame(BaseGame):
                     else:
                         self.logger.warning(f"Failed to timeout {target_name}: status={status}")
                         return None
-                except Exception as e:
-                    self.logger.error(f"Error processing {target_name or 'unknown'}: {e}")
+                except Exception as err:
+                    self.logger.error(f"Error processing {target_name or 'unknown'}: {err}")
                     return None
 
             channel = self.bot.get_channel(channel_name)

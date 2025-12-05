@@ -85,8 +85,8 @@ class EventSubManager:
                 else:
                     logger.info("EventSub WebSocket already closed")
 
-            except Exception:
-                logger.exception("Error closing EventSub WebSocket")
+            except Exception as e:
+                logger.exception(f"Error closing EventSub WebSocket: {e}", exc_info=True)
 
             finally:
                 self.client = None

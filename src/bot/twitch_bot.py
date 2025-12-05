@@ -1,5 +1,6 @@
 import logging
 import os
+from contextlib import suppress
 from typing import Any
 
 from twitchio import Message
@@ -59,6 +60,7 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
         self.eventsub = EventSubManager(self)
         self.triggers = build_triggers(self)
         self.token_refresh_task = None
+        self.is_connected: bool = False
 
     async def event_token_expired(self) -> str | None:
         """
@@ -175,23 +177,17 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
         logger.info("Shutdown...")
         self.is_connected = False
 
-        try:
+        with suppress(Exception):
             await self.eventsub.close()
-        except Exception:
-            pass
 
-        try:
+        with suppress(Exception):
             await self.api.close()
-        except Exception:
-            pass
 
         if self.db:
-            await self.db.close()
+            with suppress(Exception):
+                await self.db.close()
 
-        try:
+        with suppress(Exception):
             await super().close()
-        except Exception:
-            pass
 
         logger.info("TwitchBot closed")
-        self._running = False

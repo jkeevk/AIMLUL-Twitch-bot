@@ -14,14 +14,15 @@ logger = logging.getLogger("main")
 
 async def main() -> None:
     """Main entry point for the bot: initializes token manager and starts bot."""
+    manager = None
     try:
         logger.info("Starting bot...")
         token_manager = TokenManager(CONFIG_PATH)
         manager = BotManager(token_manager)
 
         await manager.start()
-    except Exception:
-        logger.exception("Bot crashed!")
+    except Exception as e:
+        logger.exception(f"Bot crashed!: {e}")
     finally:
         if manager and manager.bot:
             await manager.bot.close()
