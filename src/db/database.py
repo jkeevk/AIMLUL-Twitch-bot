@@ -160,14 +160,12 @@ class Database:
         """
         try:
             async with self.session_scope() as session:
-                subquery = (
-                    select(
-                        PlayerStats.twitch_id,
-                        func.rank().over(order_by=desc(PlayerStats.wins)).label("position"),
-                    )
-                ).subquery()
-
-                stmt = select(subquery.c.position).where(subquery.c.twitch_id == twitch_id)
+                stmt = (
+                    select(func.dense_rank().over(order_by=desc(PlayerStats.wins)).label("position"))
+                    .where(PlayerStats.twitch_id == twitch_id)
+                    .where(PlayerStats.wins.is_not(None))
+                    .limit(1)
+                )
                 result = await session.execute(stmt)
                 rank = result.scalar()
 
