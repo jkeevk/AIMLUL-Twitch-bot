@@ -137,7 +137,9 @@ class BotManager:
                 try:
                     await self.bot_task
                 except asyncio.CancelledError:
-                    pass
+                    logger.debug("Bot task cancelled")
+                except Exception as e:
+                    logger.warning(f"Error during bot task cancellation: {e}")
 
             self.bot_task = None
             self.bot = None
@@ -148,10 +150,16 @@ class BotManager:
                 self.bot = TwitchBot(self.token_manager, token)
                 self.bot_task = asyncio.create_task(self.bot.start())
                 self._websocket_error_count = 0
-                logger.info("Bot restarted successfully")
+
+                await asyncio.sleep(10)
+
+                if self.bot and getattr(self.bot, "is_connected", False):
+                    logger.info("Bot restarted successfully")
+                else:
+                    logger.warning("Bot restarted but not connected yet")
 
             except Exception as e:
-                logger.error(f"Failed to restart bot: {e}")
+                logger.error(f"Failed to restart bot: {e}", exc_info=True)
                 self.bot = None
                 self.bot_task = None
 
@@ -220,62 +228,133 @@ class BotManager:
                 await asyncio.sleep(300)
 
     async def _watchdog_loop(self) -> None:
-        """Monitor bot health with time-sensitive thresholds."""
+        """Monitor Twitch WebSocket health and restart the bot on repeated failures."""
         while self._running:
-            hour = datetime.now().astimezone().hour
-            # Night (01:00-07:00):
-            if 1 <= hour < 7:
-                await asyncio.sleep(300)
-                max_failures = 5
-            else:
+            try:
+                hour = datetime.now().astimezone().hour
+                if 1 <= hour < 7:
+                    max_failures = 5
+                    check_interval = 300
+                    restart_delay = 30
+                else:
+                    max_failures = 3
+                    check_interval = 120
+                    restart_delay = 15
+
+                await asyncio.sleep(check_interval)
+
+                healthy = await self._check_bot_health()
+                if healthy and self.bot and hasattr(self.bot, "eventsub"):
+                    try:
+                        await self.bot.eventsub.ensure_alive()
+                    except Exception as e:
+                        logger.warning(f"Error ensuring EventSub alive: {e}")
+                if not healthy:
+                    self._websocket_error_count += 1
+                    logger.warning(f"WebSocket unhealthy ({self._websocket_error_count}/{max_failures})")
+
+                    if self._websocket_error_count == 1:
+                        logger.info("Giving bot time to self-recover...")
+                        await asyncio.sleep(60)
+                        healthy = await self._check_bot_health()
+                        if healthy:
+                            logger.info("Bot recovered automatically")
+                            self._websocket_error_count = 0
+                            continue
+
+                    if self._websocket_error_count >= max_failures:
+                        logger.error(f"Critical WebSocket errors → restarting bot in {restart_delay}s")
+                        await asyncio.sleep(restart_delay)
+                        await self.restart_bot()
+                        self._websocket_error_count = 0
+                else:
+                    self._websocket_error_count = 0
+
+            except Exception as e:
+                logger.exception(f"Error in watchdog loop: {e}")
                 await asyncio.sleep(60)
-                max_failures = 3
-
-            if not await self._check_bot_health():
-                self._websocket_error_count += 1
-                logger.warning(f"WebSocket unhealthy ({self._websocket_error_count}/{max_failures})")
-
-                if self._websocket_error_count >= max_failures:
-                    logger.error("Critical WebSocket errors → restart bot")
-                    await self.restart_bot()
-            else:
-                self._websocket_error_count = 0
 
     async def _check_bot_health(self) -> bool:
         """
-        Check bot connection and WebSocket health.
-
-        Args:
-            None.
+        Check bot connection, Twitch WebSocket, and EventSub WebSocket health.
 
         Returns:
-            True if the bot is healthy, False otherwise.
+            True if all critical WS are healthy, False otherwise.
         """
         if not self.bot:
+            logger.debug("Bot not initialized in health check")
             return False
+
         try:
             if not getattr(self.bot, "is_connected", False):
+                logger.debug("Bot is_connected = False")
+                return False
+
+            ws_ok = await self._check_websocket()
+            if not ws_ok:
+                logger.debug("WebSocket check failed")
                 return False
 
             expected_channels = self.bot.config.get("channels", [])
-
             if not expected_channels:
-                logger.error("No channels configured in TwitchBot, but connection is up.")
+                logger.error("No channels configured in TwitchBot")
                 return False
 
             expected = {c.lower() for c in expected_channels}
             actual = {c.name.lower() for c in self.bot.connected_channels}
-
             missing = expected - actual
 
             if missing:
-                logger.warning(f"Bot connected but failed to join channels: {missing}")
-                return False
+                logger.debug(f"Missing channels (might be temporary): {missing}")
+                if len(actual) == 0:
+                    logger.warning("Not connected to any channels")
+                    return False
+                logger.info(f"Connected to {len(actual)}/{len(expected)} channels")
 
-            return await self._check_websocket()
+            if hasattr(self.bot, "eventsub") and self.bot.eventsub:
+                eventsub_ok = await self._check_eventsub()
+                if not eventsub_ok:
+                    logger.warning("EventSub health check failed")
+
+            return True
 
         except Exception as e:
             logger.exception(f"Error during _check_bot_health: {e}")
+            return False
+
+    async def _check_eventsub(self) -> bool:
+        """Check the health of the EventSub WebSocket client.
+
+        Returns:
+            True if there is at least one active EventSub socket, otherwise False.
+        """
+        try:
+            eventsub = self.bot.eventsub
+
+            if not hasattr(eventsub, "client") or not eventsub.client:
+                logger.debug("EventSub client not initialized")
+                return False
+
+            client = eventsub.client
+
+            if hasattr(client, "_sockets"):
+                sockets = client._sockets
+                if not sockets:
+                    logger.debug("No EventSub sockets")
+                    return False
+
+                active_sockets = [s for s in sockets if hasattr(s, "is_connected") and s.is_connected]
+                if not active_sockets:
+                    logger.debug("No active EventSub sockets")
+                    return False
+
+                logger.debug(f"EventSub has {len(active_sockets)} active sockets")
+                return True
+
+            return False
+
+        except Exception as e:
+            logger.warning(f"Error checking EventSub: {e}")
             return False
 
     async def _check_websocket(self) -> bool:
@@ -290,18 +369,29 @@ class BotManager:
         """
         if not self.bot:
             return False
+
         try:
-            ws = getattr(self.bot, "_ws", None)
-            if ws is not None:
-                return not ws.closed
+            if hasattr(self.bot, "is_connected"):
+                if not self.bot.is_connected:
+                    return False
 
-            conn = getattr(self.bot, "_connection", None)
-            if conn:
-                ws2 = getattr(conn, "_websocket", None)
-                if ws2 is not None:
-                    return not ws2.closed
+            try:
+                if hasattr(self.bot, "fetch_users"):
+                    users = await self.bot.fetch_users(names=[self.bot.nick])
+                    if users and len(users) > 0:
+                        return True
+            except Exception:
+                pass
 
-            return True
+            if hasattr(self.bot, "_connection") and self.bot._connection:
+                if hasattr(self.bot._connection, "connected") and self.bot._connection.connected:
+                    return True
+
+            if hasattr(self.bot, "connected_channels") and self.bot.connected_channels:
+                return True
+
+            return False
+
         except Exception as e:
-            logger.exception(f"Error during _check_websocket: {e}")
+            logger.warning(f"Error checking websocket: {e}")
             return False

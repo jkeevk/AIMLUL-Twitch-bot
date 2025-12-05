@@ -27,6 +27,8 @@ class EventSubManager:
         """
         self.bot = bot
         self.client: eventsub.EventSubWSClient | None = None
+        self.broadcaster_id: str | None = None
+        self.subscribed = False
 
     async def setup(self) -> None:
         """
@@ -40,56 +42,64 @@ class EventSubManager:
             return
 
         try:
-            self.client = eventsub.EventSubWSClient(self.bot)
-            streamer_token = await self.bot.token_manager.get_streamer_token()
-            channel_list = self.bot.config["channels"]
-
+            channel_list = self.bot.config.get("channels") or []
             if not channel_list:
                 logger.warning("Channel list is empty in config. EventSub setup skipped.")
                 return
-            channel_name = channel_list[0]
 
-            users = await self.bot.fetch_users(names=[channel_name])
+            users = await self.bot.fetch_users(names=[channel_list[0]])
             if not users:
-                logger.error(f"Streamer not found: {channel_name}")
+                logger.error(f"Streamer not found: {channel_list[0]}")
                 return
+            self.broadcaster_id = users[0].id
 
-            broadcaster_id = users[0].id
-
-            try:
-                await self.client.subscribe_channel_points_redeemed(
-                    broadcaster_id,
-                    streamer_token,
-                )
-                logger.info("EventSub started successfully (channel points)")
-            except Unauthorized:
-                logger.warning("Streamer is not Affiliate/Partner — channel points EventSub disabled.")
+            await self._start_client()
 
         except Exception as e:
             logger.error(f"EventSub setup failed: {e}", exc_info=True)
 
+    async def _start_client(self) -> None:
+        """Create the EventSub WebSocket client and subscribe to channel point redemptions."""
+        if not self.client:
+            self.client = eventsub.EventSubWSClient(self.bot)
+
+        token = await self.bot.token_manager.get_streamer_token()
+        if not token:
+            logger.warning("Cannot get streamer token → EventSub disabled")
+            return
+
+        try:
+            if not self.subscribed and self.broadcaster_id:
+                await self.client.subscribe_channel_points_redeemed(self.broadcaster_id, token)
+                self.subscribed = True
+                logger.info("EventSub WS client created and subscribed successfully")
+        except Unauthorized:
+            logger.warning("Streamer is not Affiliate/Partner — channel points EventSub disabled")
+        except Exception as e:
+            logger.warning(f"Failed to subscribe to channel points: {e}")
+
+    async def ensure_alive(self) -> None:
+        """
+        Ensure the EventSub WebSocket client is active.
+
+        If disconnected or uninitialized, attempts to recreate and resubscribe.
+
+        """
+        try:
+            if self.client is None or self.subscribed is False:
+                logger.warning("EventSub client not initialized → starting client")
+                await self._start_client()
+            else:
+                sockets = getattr(self.client, "_sockets", [])
+                if not any(getattr(sock, "is_connected", False) for sock in sockets):
+                    logger.warning("EventSub sockets disconnected → reconnecting")
+                    await self._start_client()
+        except Exception as e:
+            logger.warning(f"Failed to ensure EventSub WS alive: {e}")
+
     async def close(self) -> None:
-        """
-        Close the EventSub WebSocket connection.
-
-        Args:
-            None.
-        """
+        """Reset and clear the EventSub WebSocket client."""
         if self.client:
-            try:
-                ws = getattr(self.client, "_websocket", None)
-
-                if ws and not ws.closed:
-                    await ws.close()
-                    logger.info("EventSub WebSocket closed")
-                else:
-                    logger.info("EventSub WebSocket already closed")
-
-            except Exception as e:
-                logger.exception(f"Error closing EventSub WebSocket: {e}", exc_info=True)
-
-            finally:
-                self.client = None
-
-        else:
-            logger.info("EventSub WebSocket was never created")
+            self.client = None
+            self.subscribed = False
+            logger.info("EventSub client cleared")
