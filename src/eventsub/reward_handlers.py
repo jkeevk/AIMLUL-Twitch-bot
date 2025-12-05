@@ -38,7 +38,7 @@ async def beer_barrel_handler(event: Any, bot: Any) -> None:
     await bot.command_handler.handle_beer_barrel(user_name, channel_name)
 
 
-async def beer_сhallenge_handler(event: Any, bot: Any) -> None:
+async def beer_challenge_handler(event: Any, bot: Any) -> None:
     """
     Handle 'испытание пивом' channel point reward redemption.
 
@@ -57,5 +57,5 @@ async def beer_сhallenge_handler(event: Any, bot: Any) -> None:
 reward_handlers: dict[str, Any] = {
     "очко": twenty_one_handler,
     "вскрыть пивную кегу": beer_barrel_handler,
-    "испытание пивом": beer_сhallenge_handler,
+    "испытание пивом": beer_challenge_handler,
 }
