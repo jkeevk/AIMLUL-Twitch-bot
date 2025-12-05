@@ -2,7 +2,7 @@ import asyncio
 import hashlib
 import secrets
 import time
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import jwt
@@ -48,23 +48,22 @@ class LoginAttempts:
         """Record a failed login attempt."""
         async with self.lock:
             now = time.time()
-            if ip not in self.attempts:
-                self.attempts[ip] = {"count": 0, "last_attempt": now}
-            attempt = self.attempts[ip]
+            attempt = self.attempts.setdefault(ip, {"count": 0, "last_attempt": now})
+
             attempt["count"] += 1
             attempt["last_attempt"] = now
 
-            if attempt["count"] >= settings.password_attempts_limit:
-                attempt["blocked_until"] = now + settings.session_timeout_minutes * 60
+            if attempt["count"] >= settings.max_login_attempts:
+                attempt["blocked_until"] = now + settings.lockout_duration_minutes * 60
 
     async def is_blocked(self, ip: str) -> bool:
         """Check if login is blocked due to too many failed attempts."""
         async with self.lock:
             attempt = self.attempts.get(ip)
-            if not attempt:
+            if attempt is None:
                 return False
-            blocked_until: float = attempt.get("blocked_until", 0)
-            return time.time() < blocked_until
+            blocked_until = attempt.get("blocked_until")
+            return blocked_until is not None and time.time() < blocked_until
 
     async def clear_attempts(self, ip: str) -> None:
         """Clear login attempts for a specific IP."""
@@ -74,13 +73,11 @@ class LoginAttempts:
     async def cleanup_old_attempts(self) -> None:
         """Remove old login attempts older than 1 hour."""
         async with self.lock:
-            current_time = time.time()
-            to_remove = [ip for ip, attempt in self.attempts.items() if current_time - attempt["last_attempt"] > 3600]
-            for ip in to_remove:
-                del self.attempts[ip]
+            now = time.time()
+            self.attempts = {ip: att for ip, att in self.attempts.items() if now - att["last_attempt"] <= 3600}
 
 
-async def create_token(username: str) -> str:
+def create_token(username: str) -> str:
     """
     Create a JWT token for an authenticated user.
 
@@ -90,16 +87,19 @@ async def create_token(username: str) -> str:
     Returns:
         str: JWT token string.
     """
+    now = datetime.now(UTC)
+    expiry = now + timedelta(minutes=settings.session_duration_minutes)
+
     payload = {
         "sub": username,
-        "exp": datetime.utcnow() + timedelta(minutes=settings.session_timeout_minutes),
-        "iat": datetime.utcnow(),
+        "exp": int(expiry.timestamp()),
+        "iat": int(now.timestamp()),
     }
     token: str = jwt.encode(payload, settings.secret_key, algorithm=settings.jwt_algorithm)
     return token
 
 
-async def decode_token(token: str) -> str | None:
+def decode_token(token: str) -> str | None:
     """
     Decode a JWT token and return the username.
 
@@ -111,7 +111,10 @@ async def decode_token(token: str) -> str | None:
     """
     try:
         payload: dict[str, Any] = jwt.decode(token, settings.secret_key, algorithms=[settings.jwt_algorithm])
-        return payload.get("sub")
+        sub = payload.get("sub")
+        if isinstance(sub, str):
+            return sub
+        return None
     except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
         return None
 
