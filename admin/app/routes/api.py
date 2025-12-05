@@ -1,24 +1,24 @@
 import logging
 import time
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from app.config import settings
-from app.dependencies import get_client_ip, get_current_user_optional, verify_token
+from app.dependencies import get_client_ip, get_current_user_optional
 from app.models import SSHConnectionRequest
 from app.security import create_token, login_attempts
 from app.services.ssh_client import AsyncSSHWrapper
 from app.services.websocket_manager import websocket_manager
 from app.utils.jinja_setup import templates
-from fastapi import APIRouter, Depends, Form, Request, WebSocket, WebSocketDisconnect, status
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi import APIRouter, Form, Request, WebSocket, WebSocketDisconnect, status
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
 @router.get("/", response_class=HTMLResponse)
-async def root(request: Request) -> HTMLResponse:
+async def root(request: Request) -> Response:
     """
     Main application page.
 
@@ -62,7 +62,7 @@ async def login_post(
     request: Request,
     username: str = Form(...),
     password: str = Form(...),
-) -> HTMLResponse:
+) -> Response:
     """
     Authenticate user and set session cookie.
 
@@ -96,7 +96,7 @@ async def login_post(
 
     if username == settings.auth_username and password == settings.auth_password:
         await login_attempts.clear_attempts(client_ip)
-        token = await create_token(username)
+        token = create_token(username)
         resp = RedirectResponse("/", status_code=status.HTTP_302_FOUND)
         resp.set_cookie(
             "session",
@@ -104,13 +104,13 @@ async def login_post(
             httponly=True,
             secure=False,
             samesite="lax",
-            max_age=settings.session_timeout_minutes * 60,
+            max_age=settings.session_duration_minutes * 60,
         )
         return resp
 
     await login_attempts.failed_attempt(client_ip)
     remaining_attempts = max(
-        0, settings.password_attempts_limit - login_attempts.attempts.get(client_ip, {}).get("count", 0)
+        0, settings.max_login_attempts - login_attempts.attempts.get(client_ip, {}).get("count", 0)
     )
     error_msg = "Invalid username or password."
     if remaining_attempts > 0:
@@ -150,7 +150,6 @@ async def fetch_logs(
     password: str = Form(""),
     container: str = Form(...),
     lines: int = Form(200),
-    user: str = Depends(verify_token),
 ) -> HTMLResponse:
     """Fetch Docker container logs via SSH.
 
@@ -161,7 +160,6 @@ async def fetch_logs(
         password: SSH password.
         container: Docker container name.
         lines: Number of log lines to fetch.
-        user: Authenticated username.
 
     Returns:
         HTMLResponse: Rendered logs page with container logs.
@@ -206,18 +204,15 @@ async def container_action(
     password: str = Form(""),
     container: str = Form(...),
     action: str = Form(...),
-    user: str = Depends(verify_token),
 ) -> JSONResponse:
     """Execute Docker container actions via SSH.
 
     Args:
-        request: FastAPI request object.
         ip: SSH host IP address.
         username: SSH username.
         password: SSH password.
         container: Docker container name.
         action: Action to perform (start, stop, restart, status, stats, logs, inspect).
-        user: Authenticated username.
 
     Returns:
         JSONResponse: Action result with status and output data.
@@ -269,14 +264,14 @@ async def websocket_logs(websocket: WebSocket) -> None:
         logger.error(f"WebSocket error {connection_id}: {exc}")
         try:
             await websocket.send_text(f"Connection error: {exc}")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"WebSocket error {connection_id}: {e}")
     finally:
         websocket_manager.disconnect(connection_id)
         try:
             await websocket.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"WebSocket error {connection_id}: {e}")
 
 
 @router.get("/health")
@@ -286,4 +281,4 @@ async def health_check() -> JSONResponse:
     Returns:
         JSONResponse: Service status information with timestamp and version.
     """
-    return JSONResponse(content={"status": "healthy", "timestamp": datetime.utcnow().isoformat(), "version": "1.0.0"})
+    return JSONResponse(content={"status": "healthy", "timestamp": datetime.now(UTC).isoformat(), "version": "1.0.0"})
