@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from datetime import datetime
 
 from aiohttp import web
 
@@ -69,12 +70,12 @@ class BotManager:
             await self.health_runner.cleanup()
             logger.info("Health server stopped")
 
-    async def _handle_health(self, request: web.Request) -> web.Response:
+    async def _handle_health(self, _: web.Request) -> web.Response:
         """
         Handle /health HTTP requests.
 
         Args:
-            request: aiohttp request object.
+            _: aiohttp request object (not used).
 
         Returns:
             HTTP 200 OK if bot is healthy, HTTP 500 UNHEALTHY otherwise.
@@ -214,25 +215,27 @@ class BotManager:
 
             except asyncio.CancelledError:
                 return
-            except Exception:
-                logger.exception("Token refresh failed")
+            except Exception as e:
+                logger.exception(f"Token refresh failed: {e}")
                 await asyncio.sleep(300)
 
     async def _watchdog_loop(self) -> None:
-        """
-        Monitor bot health and restart on failures.
-
-        Args:
-            None.
-        """
-        check_interval = 60
+        """Monitor bot health with time-sensitive thresholds."""
         while self._running:
-            await asyncio.sleep(check_interval)
-            healthy = await self._check_bot_health()
-            if not healthy:
+            hour = datetime.now().astimezone().hour
+            # Night (01:00-07:00):
+            if 1 <= hour < 7:
+                await asyncio.sleep(300)
+                max_failures = 5
+            else:
+                await asyncio.sleep(60)
+                max_failures = 3
+
+            if not await self._check_bot_health():
                 self._websocket_error_count += 1
-                logger.warning(f"WebSocket unhealthy ({self._websocket_error_count}/3)")
-                if self._websocket_error_count >= 3:
+                logger.warning(f"WebSocket unhealthy ({self._websocket_error_count}/{max_failures})")
+
+                if self._websocket_error_count >= max_failures:
                     logger.error("Critical WebSocket errors → restart bot")
                     await self.restart_bot()
             else:
@@ -271,8 +274,8 @@ class BotManager:
 
             return await self._check_websocket()
 
-        except Exception:
-            logger.exception("Error during _check_bot_health")
+        except Exception as e:
+            logger.exception(f"Error during _check_bot_health: {e}")
             return False
 
     async def _check_websocket(self) -> bool:
@@ -299,5 +302,6 @@ class BotManager:
                     return not ws2.closed
 
             return True
-        except Exception:
+        except Exception as e:
+            logger.exception(f"Error during _check_websocket: {e}")
             return False
