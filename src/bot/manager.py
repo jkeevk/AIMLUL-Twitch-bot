@@ -48,7 +48,7 @@ class BotManager:
         self.health_app = None
         self.health_runner = None
 
-    async def start_health_server(self, host: str = "0.0.0.0", port: int = 8081) -> None:
+    async def start_health_server(self, host: str = "127.0.0.1", port: int = 8081) -> None:
         """
         Start an internal HTTP server for health checking.
 
