@@ -16,13 +16,22 @@ class BeerBarrelGame(BaseGame):
     _is_running: bool = False
     active_players: set[str] = set()
     kaban_players: set[str] = set()
-    KABAN_TARGET_COUNT: int = 10
+    KABAN_TARGET_COUNT: int = 12
     KABAN_TIME_LIMIT: int = 60
 
-    async def _send_batched_message(self, channel: Any, prefix: str, names: list[str] | set[str]) -> None:
+    @staticmethod
+    async def _send_batched_message(channel: Any, prefix: str, names: list[str] | set[str]) -> None:
         """
-        Splits a list of usernames into chunks and sends them to the channel,
-        ensuring each message does not exceed MAX_MESSAGE_LENGTH.
+        Sends a list of usernames to the channel in batches, ensuring that
+        no single message exceeds the maximum allowed length.
+
+        Args:
+            channel (Any): The channel object where messages will be sent.
+            prefix (str): Text prefix to start each message with.
+            names (list[str] | set[str]): Usernames to mention in the message.
+
+        Returns:
+            None
         """
         if not names:
             return
@@ -44,12 +53,42 @@ class BeerBarrelGame(BaseGame):
         if current_message.strip() and current_message != prefix:
             await channel.send(current_message.rstrip(", "))
 
+    async def _update_kaban_status(self, channel: Any, challenge_success: bool, remaining_seconds: int) -> bool:
+        """
+        Updates the Kaban Challenge status by checking the number of participants
+        and sending an intermediate status message to the channel.
+
+        Args:
+            channel (Any): The channel object where messages will be sent.
+            challenge_success (bool): Current success status of the Kaban Challenge.
+            remaining_seconds (int): Number of seconds remaining in the challenge.
+
+        Returns:
+            bool: Updated status indicating whether the challenge has succeeded.
+        """
+        current_count = len(self.kaban_players)
+        if current_count >= self.KABAN_TARGET_COUNT and not challenge_success:
+            challenge_success = True
+            self.logger.info("Kaban Challenge succeeded early!")
+        elif 0 < current_count < self.KABAN_TARGET_COUNT:
+            remaining_needed = self.KABAN_TARGET_COUNT - current_count
+            await channel.send(
+                f"MadgeTime Осталось {remaining_seconds} секунд до вскрытия пивной кеги! "
+                f"Прибыло {current_count}/{self.KABAN_TARGET_COUNT}. Нужно еще {remaining_needed}! where"
+            )
+        return challenge_success
+
     async def _run_kaban_challenge_and_determine_fate(self, channel: Any) -> bool:
         """
-        Runs the Kaban Challenge timer, integrates visual countdown (ASCII/messages),
-        and executes the final roll based on Kaban success.
+        Executes the Kaban Challenge event, including countdown messages,
+        visual notifications, and the final determination of success or failure.
 
-        Returns: True if the standard punishment should be executed, False otherwise.
+        Args:
+            channel (Any): The channel object where messages will be sent.
+
+        Returns:
+            bool: True if the standard punishment should be applied (challenge failed),
+                  False if the challenge succeeded and punishment is avoided.
         """
         channel_name = channel.name
         challenge_success = False
@@ -58,37 +97,19 @@ class BeerBarrelGame(BaseGame):
 
         ascii_art_start = "⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠟⠉⠀⠀⠀⠉⠻⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣿⣿⣿⡏⠀⠀⠀⠀⠀⠀⠀⠸⠉⠻⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⡿⢿⣿⡿⠓⠀⠀⡎⠉⠉⢢⠀⠀⠀⠀⠛⢿⠋⢻⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣤⣤⣿⡀⠀⠀⠀⠓⠴⠃⣼⠀⠀⠀⠀⠀⢸⣿⠁⣸⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⠀⢹⣿⠒⠒⠒⠒⠒⠚⢿⠀⣤⣄⠀⢸⣛⣛⠛⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣶⠛⣿⡄⠀⣀⠀⠀⣀⣼⠀⣧⡈⠷⢾⣿⣿⡇⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⢸⡏⠀⠀⡏⢿⣀⣿⠁⠀⢸⣿⣿⡇⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⢸⡇⠀⠀⡇⠀⠉⣿⠀⠀⢸⣿⣿⡇⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⢸⡇⠀⠀⡇⠀⠀⣿⠀⠀⢸⣋⣉⣁⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⢸⡇⠀⠀⡇⠀⠀⣿⠀⠀⢸⣿⣿⣿⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⢸⡇⠀⠀⡇⠀⠀⣿⠀⠀⢸⣿⣿⣿⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⢸⣇⠀⠀⣧⠀⠀⣿⡀⠀⢸⣿⣿⣿⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣿⣿⣿⣇⠀⠁⠀⠀⠈⠀⠀⠈⠀⢀⣾⣿⣿⣿⣿⣿⣿⣿⣿⣿ ⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿"  # noqa: E501
         await channel.send(ascii_art_start)
-        await channel.send("catLicks ПРИГОТОВИЛИСЬ! ДО ВСКРЫТИЯ ПИВНОЙ КЕГИ 60 СЕКУНД! catLicks")
+        await channel.send(f"catLicks ПРИГОТОВИЛИСЬ! ДО ВСКРЫТИЯ ПИВНОЙ КЕГИ {self.KABAN_TIME_LIMIT} СЕКУНД! catLicks")
         await asyncio.sleep(2)
         await channel.send(
-            f"DinkDonk Начинается 'Прибежать кабанчиком на пиво KabanRunZaPivom '! Нужно {self.KABAN_TARGET_COUNT} героев, чтобы обезвредить кегу!"
+            f"DinkDonk Начинается 'Прибежать кабанчиком на пиво'! KabanRunZaPivom Активируйте награды за баллы канала, чтобы обезвредить кегу! Нужно {self.KABAN_TARGET_COUNT} героев!"
         )
 
         await asyncio.sleep(18)
 
-        current_count = len(self.kaban_players)
-        if current_count >= self.KABAN_TARGET_COUNT and not challenge_success:
-            challenge_success = True
-            self.logger.info("Kaban Challenge succeeded early!")
-
-        if current_count > 0 and current_count < self.KABAN_TARGET_COUNT:
-            remaining_needed = self.KABAN_TARGET_COUNT - current_count
-            await channel.send(
-                f"MadgeTime Осталось 40 секунд до взрыва! Собрано {current_count}/{self.KABAN_TARGET_COUNT}. Нужно еще {remaining_needed}!"
-            )
+        challenge_success = await self._update_kaban_status(channel, challenge_success, 40)
 
         await asyncio.sleep(20)
 
-        current_count = len(self.kaban_players)
-        if current_count >= self.KABAN_TARGET_COUNT and not challenge_success:
-            challenge_success = True
-            self.logger.info("Kaban Challenge succeeded early!")
-
-        if current_count > 0 and current_count < self.KABAN_TARGET_COUNT:
-            remaining_needed = self.KABAN_TARGET_COUNT - current_count
-            await channel.send(
-                f"MadgeTime Осталось 20 секунд до взрыва! Собрано {current_count}/{self.KABAN_TARGET_COUNT}. Нужно еще {remaining_needed}!"
-            )
+        challenge_success = await self._update_kaban_status(channel, challenge_success, 20)
 
         await asyncio.sleep(10)
         await channel.send("catLicks ГОТОВЬТЕ КРУЖКИ! 10 СЕКУНД catLicks")
@@ -98,7 +119,7 @@ class BeerBarrelGame(BaseGame):
             challenge_success = True
 
         if challenge_success:
-            await channel.send("Кабанчики прибыли в полном составе! Gregories")
+            await channel.send("NaSozvoneXyli Кабанчики прибыли в полном составе! Gregories")
         await asyncio.sleep(5)
         await channel.send("Кто тащил кегу??? Wigglecat Прячься, сейчас пизданёт KabanRunZaPivom")
         await asyncio.sleep(1)
@@ -127,8 +148,15 @@ class BeerBarrelGame(BaseGame):
 
     async def handle_beer_barrel_command(self, user_name: str, channel_name: str) -> None:
         """
-        Initiates the Beer Barrel event, selects targets, executes timeouts,
-        and announces results.
+        Initiates the Beer Barrel event, selects users for punishment,
+        executes timeouts, and announces results.
+
+        Args:
+            user_name (str): The user who triggered the command.
+            channel_name (str): The name of the Twitch channel where the event occurs.
+
+        Returns:
+            None
         """
         self._is_running = True
         self.active_players.clear()
@@ -233,13 +261,13 @@ class BeerBarrelGame(BaseGame):
             await asyncio.sleep(5)
 
             if survived_targets:
-                prefix = "ICANT Помойные но живые: "
+                prefix = "ICANT Помойные но трезвые: "
                 await self._send_batched_message(channel, prefix, survived_targets)
 
             await asyncio.sleep(1)
 
             if bought_air:
-                prefix = "GAGAGA Купили воздух за 800: "
+                prefix = "GAGAGA Купили воздух за 2000: "
                 await self._send_batched_message(channel, prefix, bought_air)
 
             self.logger.info(f"Beer barrel completed. Successful punishments: {len(punished_users)}")
@@ -253,8 +281,15 @@ class BeerBarrelGame(BaseGame):
 
     async def handle_trash_command(self, user_name: str, channel_name: str) -> None:
         """
-        Allows a player to activate the 'Hide in a trash bin' command to protect themselves
-        from the Beer Barrel event.
+        Activates the 'Hide in a trash bin' protection for a user,
+        preventing them from being targeted during the Beer Barrel event.
+
+        Args:
+            user_name (str): The user activating the protection.
+            channel_name (str): The name of the Twitch channel where the event occurs.
+
+        Returns:
+            None
         """
         if not self._is_running:
             self.logger.info(f"{user_name} attempted to protect but barrel is not running")
@@ -269,7 +304,14 @@ class BeerBarrelGame(BaseGame):
 
     async def handle_kaban_command(self, user_name: str, channel_name: str) -> None:
         """
-        Allows a player to join the 'Kaban Challenge' to neutralize the barrel.
+        Allows a user to join the Kaban Challenge, contributing to neutralizing the Beer Barrel event.
+
+        Args:
+            user_name (str): The user joining the Kaban Challenge.
+            channel_name (str): The name of the Twitch channel where the challenge occurs.
+
+        Returns:
+            None
         """
         if not self._is_running:
             self.logger.info(f"{user_name} attempted to join Kaban Challenge, but barrel is not running.")
