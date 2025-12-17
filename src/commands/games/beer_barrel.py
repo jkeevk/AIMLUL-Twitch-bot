@@ -164,14 +164,27 @@ class BeerBarrelGame(BaseGame):
 
         try:
             if self.cache_manager.should_update_cache():
-                chatters: list[dict[str, Any]] = await self.api.get_chatters(channel_name)
-                normalized: list[dict[str, str]] = [
-                    {"id": c["user_id"], "name": c["user_name"], "display_name": c["user_name"]} for c in chatters
+                chatters = await self.api.get_chatters(channel_name)
+                normalized = [
+                    {"id": str(c["user_id"]), "name": c["user_name"], "display_name": c["user_name"]}
+                    for c in chatters
                 ]
                 self.cache_manager._cached_chatters = self.cache_manager.filter_chatters(normalized)
                 self.cache_manager._last_cache_update = time.time()
 
-            valid_chatters: list[dict[str, str]] = self.cache_manager.get_cached_chatters()
+            raw_chatters = self.cache_manager.get_cached_chatters()
+
+            valid_chatters: list[dict[str, str]] = []
+            for c in raw_chatters:
+                if isinstance(c, dict):
+                    valid_chatters.append(c)
+                else:
+                    valid_chatters.append({
+                        "id": str(getattr(c, "id", "") or getattr(c, "_id", "")),
+                        "name": getattr(c, "name", ""),
+                        "display_name": getattr(c, "display_name", "")
+                    })
+
             random.shuffle(valid_chatters)
             self.logger.info(f"Available chatters for selection: {len(valid_chatters)}")
 
