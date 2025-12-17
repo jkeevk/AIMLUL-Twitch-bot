@@ -1,9 +1,9 @@
 services:
-  twitch-bot:
+  bot:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: twitch-bot
+    container_name: bot
     restart: unless-stopped
     depends_on:
       db:
@@ -12,30 +12,35 @@ services:
       - ./settings.ini:/app/settings.ini:rw
       - ./src:/app/src:rw
     environment:
-      TZ: Europe/Moscow
-      DATABASE_URL: postgresql+asyncpg://bot:botpassword@db/twitch_bot
+      TZ: "Europe/Moscow"
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://bot:botpassword@db/twitch_bot}
     logging:
-      driver: "json-file"
+      driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8081/health || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
     networks:
       - webnet
 
   db:
     image: postgres:17
-    container_name: twitch-db
+    container_name: db
     environment:
-      POSTGRES_USER: bot
-      POSTGRES_PASSWORD: botpassword
-      POSTGRES_DB: twitch_bot
+      POSTGRES_USER: ${POSTGRES_USER:-bot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-botpassword}
+      POSTGRES_DB: ${POSTGRES_DB:-twitch_bot}
       POSTGRES_INITDB_ARGS: "--locale=en_US.UTF-8"
     volumes:
       - ./data/db:/var/lib/postgresql/data
     ports:
       - "5434:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U bot -d twitch_bot"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-bot} -d ${POSTGRES_DB:-twitch_bot}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -46,76 +51,60 @@ services:
   admin:
     build:
       context: ./admin
-      dockerfile: Dockerfile
     container_name: admin
-    ports:
-      - "8080:8080"
     environment:
-      # Authentication
       AUTH_USERNAME: ${AUTH_USERNAME:-admin}
       AUTH_PASSWORD: ${AUTH_PASSWORD:-password}
-      PASSWORD_ATTEMPTS_LIMIT: ${PASSWORD_ATTEMPTS_LIMIT:-5}
-      SESSION_TIMEOUT_MINUTES: ${SESSION_TIMEOUT_MINUTES:-30}
-      
-      # SSH defaults
+      MAX_LOGIN_ATTEMPTS: ${MAX_LOGIN_ATTEMPTS:-5}
+      SESSION_DURATION_MINUTES: ${SESSION_DURATION_MINUTES:-30}
+      LOCKOUT_DURATION_MINUTES: ${LOCKOUT_DURATION_MINUTES:-15}
+
       DEFAULT_SSH_HOST: ${DEFAULT_SSH_HOST:-localhost}
       DEFAULT_SSH_USERNAME: ${DEFAULT_SSH_USERNAME:-root}
       DEFAULT_SSH_PASSWORD: ${DEFAULT_SSH_PASSWORD:-}
-      SSH_POOL_MAX_CONNECTIONS: ${SSH_POOL_MAX_CONNECTIONS:-5}
-      SSH_POOL_TIMEOUT: ${SSH_POOL_TIMEOUT:-300}
-      
-      # Docker
       DEFAULT_CONTAINER: ${DEFAULT_CONTAINER:-twitch-bot}
-      
-      # JWT Security
+
       SECRET_KEY: ${SECRET_KEY:-SUPER_SECRET_KEY_CHANGE_ME}
       JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
-      
-      # Logging
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-    
+
+      TZ: "Europe/Moscow"
     volumes:
       - ./admin/app/templates:/app/templates
       - ./admin/app/static:/app/static
-      - ./admin/app/:/app
-    
+      - ./admin/app:/app
+    ports:
+      - "8080:8080"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 30s
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 20s
       timeout: 10s
       retries: 3
-      start_period: 40s
-    
-    restart: unless-stopped
+      start_period: 30s
     networks:
       - webnet
 
   nginx:
     image: nginx:alpine
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./admin/nginx/nginx.conf:/etc/nginx/nginx.conf
-      - ./admin/app:/app
-      - ./admin/nginx/entrypoint.sh:/etc/nginx/entrypoint.sh:ro
-    
-    environment:
-      NGINX_ENV: production
-    
-    entrypoint: ["/bin/sh", "/etc/nginx/entrypoint.sh"]
-    
+    container_name: nginx
+    restart: unless-stopped
     depends_on:
       admin:
         condition: service_healthy
-    
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      NGINX_ENV: production
+    volumes:
+      - ./admin/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./admin/app:/app:ro
+      - ./admin/nginx/entrypoint.sh:/etc/nginx/entrypoint.sh:ro
+    entrypoint: ["/bin/sh", "/etc/nginx/entrypoint.sh"]
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
-      interval: 30s
+      test: ["CMD-SHELL", "curl -kf https://localhost/health || exit 1"]
+      interval: 20s
       timeout: 10s
       retries: 3
-    
-    restart: unless-stopped
     networks:
       - webnet
 

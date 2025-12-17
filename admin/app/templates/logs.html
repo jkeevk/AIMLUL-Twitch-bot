@@ -1,30 +1,175 @@
 {% extends "base.html" %}
 
+{% block title %}Logs for {{ container }}{% endblock %}
+
 {% block content %}
 <div class="row justify-content-center">
     <div class="col-md-10">
-        <div class="card">
+        <div class="card fade-in">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h4 class="mb-0">
                     <i class="fas fa-file-alt me-2"></i>
-                    Logs for {{ container }} on {{ ip }}
+                    Logs for <span class="text-primary">{{ container }}</span> on <span class="text-success">{{ ip }}</span>
                 </h4>
-                <a href="/" class="btn btn-outline-primary btn-sm">
-                    <i class="fas fa-arrow-left me-1"></i>Back
-                </a>
-            </div>
-            <div class="card-body p-0">
-                <div class="log-container p-3">
-                    <pre class="mb-0">{{ logs }}</pre>
+                <div class="d-flex gap-2">
+                    <a href="/" class="btn btn-outline-primary btn-sm">
+                        <i class="fas fa-arrow-left me-1"></i>Back
+                    </a>
+                    <button class="btn btn-outline-secondary btn-sm" id="copyBtn">
+                        <i class="fas fa-copy me-1"></i>Copy
+                    </button>
+                    <button class="btn btn-outline-success btn-sm" id="downloadBtn">
+                        <i class="fas fa-download me-1"></i>Download
+                    </button>
                 </div>
             </div>
-            <div class="card-footer">
+            <div class="card-body p-0">
+                <div class="log-container">
+                    <pre class="mb-0 p-3" id="logsElement">{{ logs.rstrip() }}</pre>
+                </div>
+            </div>
+            <div class="card-footer d-flex justify-content-between align-items-center">
                 <small class="text-muted">
                     <i class="fas fa-info-circle me-1"></i>
                     Logs retrieved at {{ current_time }}
                 </small>
+                <div class="text-muted">
+                    <i class="fas fa-file-lines me-1"></i>
+                    {{ logs.rstrip()|length }} characters
+                </div>
             </div>
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const LogsManager = {
+    elements: {},
+
+    init() {
+        this.cacheElements();
+        this.setupEventListeners();
+        this.autoScrollToBottom();
+    },
+
+    cacheElements() {
+        this.elements = {
+            downloadBtn: document.getElementById('downloadBtn'),
+            copyBtn: document.getElementById('copyBtn'),
+            logsElement: document.getElementById('logsElement'),
+            logContainer: document.querySelector('.log-container')
+        };
+    },
+
+    setupEventListeners() {
+        if (this.elements.downloadBtn) {
+            this.elements.downloadBtn.addEventListener('click', () => this.handleDownload());
+        }
+
+        if (this.elements.copyBtn) {
+            this.elements.copyBtn.addEventListener('click', () => this.handleCopy());
+        }
+    },
+
+    autoScrollToBottom() {
+        if (this.elements.logContainer) {
+            setTimeout(() => {
+                this.elements.logContainer.scrollTop = this.elements.logContainer.scrollHeight;
+            }, 100);
+        }
+    },
+
+    getCleanLogsText() {
+        return this.elements.logsElement?.textContent.trim() || '';
+    },
+
+    getSafeFilename() {
+        const container = "{{ container }}";
+        const time = "{{ current_time }}";
+        const safeContainer = container.replace(/[^a-zA-Z0-9-_]/g, '_');
+        const safeTime = time.replace(/[^a-zA-Z0-9-_]/g, '_');
+        return `logs_${safeContainer}_${safeTime}.txt`;
+    },
+
+    async handleDownload() {
+        try {
+            const cleanText = this.getCleanLogsText();
+            const filename = this.getSafeFilename();
+
+            const blob = new Blob([cleanText], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            link.style.display = 'none';
+
+            document.body.appendChild(link);
+            link.click();
+
+            setTimeout(() => {
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+            }, 100);
+
+            showNotification('Logs downloaded successfully!', 'success');
+        } catch (error) {
+            console.error('Download error:', error);
+            showNotification('Download failed: ' + error.message, 'danger');
+        }
+    },
+
+    async handleCopy() {
+        try {
+            const cleanText = this.getCleanLogsText();
+
+            if (navigator.clipboard && window.isSecureContext) {
+                await navigator.clipboard.writeText(cleanText);
+                showNotification('Logs copied to clipboard!', 'success');
+            } else {
+                this.fallbackCopy(cleanText);
+            }
+        } catch (error) {
+            console.error('Copy error:', error);
+            this.handleCopyFallback(error, this.getCleanLogsText());
+        }
+    },
+
+    fallbackCopy(text) {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.style.position = 'fixed';
+        textarea.style.left = '-999999px';
+        textarea.style.top = '-999999px';
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+
+        const successful = document.execCommand('copy');
+        document.body.removeChild(textarea);
+
+        if (successful) {
+            showNotification('Logs copied to clipboard!', 'success');
+        } else {
+            throw new Error('execCommand copy failed');
+        }
+    },
+
+    handleCopyFallback(error, cleanText) {
+        showNotification('Copy failed: ' + error.message, 'danger');
+
+        if (cleanText.length < 1000) {
+            alert('Copy failed. Here are the logs to copy manually:\n\n' + cleanText);
+        } else {
+            alert('Copy failed. Logs are too long to display. Please try another method.');
+        }
+    }
+};
+
+document.addEventListener('DOMContentLoaded', () => {
+    LogsManager.init();
+});
+</script>
 {% endblock %}

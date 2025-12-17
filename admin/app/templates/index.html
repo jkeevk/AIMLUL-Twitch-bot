@@ -3,7 +3,6 @@
 {% block content %}
 <div class="row justify-content-center">
     <div class="col-md-10">
-        <!-- SSH Connection Form -->
         <div class="card fade-in">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h4 class="mb-0"><i class="fas fa-terminal me-2"></i>SSH Connection</h4>
@@ -31,9 +30,7 @@
                                    placeholder="root">
                         </div>
                         <div class="col-md-6">
-                            <label for="password" class="form-label">
-                                Password
-                            </label>
+                            <label for="password" class="form-label">Password</label>
                             <div class="input-group">
                                 <input type="password" class="form-control" id="password" name="password"
                                        placeholder="{% if has_default_password %}Leave empty for default password{% else %}SSH password{% endif %}">
@@ -54,15 +51,19 @@
                         </div>
                     </div>
 
-                    <div class="mt-4 d-flex flex-wrap gap-2">
-                        <button type="submit" class="btn btn-primary" id="getLogsBtn">
+                    <div class="mt-4 d-flex flex-wrap gap-2 align-items-center">
+                        <button type="button" id="checkStatusBtn" class="btn btn-primary">
+                            Check All Statuses
+                        </button>
+
+                        <button type="button" class="btn btn-primary" id="getLogsBtn">
                             <i class="fas fa-download me-1"></i>Get Logs
                         </button>
                         <button type="button" class="btn btn-success" id="streamBtn">
-                            <i class="fas fa-play me-1"></i>Start Streaming
+                            <i class="fas fa-play me-1"></i>Start Live Logs
                         </button>
                         <button type="button" class="btn btn-danger" id="stopBtn" disabled>
-                            <i class="fas fa-stop me-1"></i>Stop Streaming
+                            <i class="fas fa-stop me-1"></i>Stop Live Logs
                         </button>
                         <button type="button" class="btn btn-outline-warning" id="clearFormBtn">
                             <i class="fas fa-broom me-1"></i>Clear
@@ -78,35 +79,38 @@
             </div>
         </div>
 
-        <!-- Container Management Section -->
         <div class="card mt-4 fade-in">
             <div class="card-header">
                 <h5 class="mb-0"><i class="fas fa-cogs me-2"></i>Container Management</h5>
             </div>
             <div class="card-body">
-                <div class="row g-2">
-                    {% for container_name in ['twitch-bot', 'twitch-db'] %}
-                    <div class="col-md-6">
-                        <div class="card h-100">
+                <div class="row g-3 justify-content-center">
+                    {% for container_name in ['bot', 'db', 'nginx', 'admin'] %}
+                    <div class="col-xl-3 col-lg-4 col-md-6">
+                        <div class="card h-100 container-card glass-card">
                             <div class="card-body">
-                                <div class="d-flex justify-content-between align-items-center mb-2">
-                                    <h6 class="card-title mb-0">{{ container_name.replace('-', ' ').title() }}</h6>
+                                <div class="d-flex justify-content-between align-items-center mb-3">
+                                    <h6 class="card-title mb-0">{{ container_name.replace('-', ' ') }}</h6>
                                     <span class="badge bg-secondary container-status" id="status-{{ container_name }}">
                                         <i class="fas fa-question-circle me-1"></i>Unknown
                                     </span>
                                 </div>
-                                <div class="d-flex gap-2 w-100">
-                                    <button type="button" class="btn btn-outline-success btn-sm flex-grow-1" onclick="containerAction('{{ container_name }}', 'start')">
-                                        <i class="fas fa-play me-1"></i>Start
+                                <div class="container-buttons-grid">
+                                    <button type="button" class="container-btn container-btn-start" onclick="ContainerManager.action('{{ container_name }}', 'start')">
+                                        <i class="fas fa-play"></i>
+                                        <span>Start</span>
                                     </button>
-                                    <button type="button" class="btn btn-outline-danger btn-sm flex-grow-1" onclick="containerAction('{{ container_name }}', 'stop')">
-                                        <i class="fas fa-stop me-1"></i>Stop
+                                    <button type="button" class="container-btn container-btn-stop" onclick="ContainerManager.action('{{ container_name }}', 'stop')">
+                                        <i class="fas fa-stop"></i>
+                                        <span>Stop</span>
                                     </button>
-                                    <button type="button" class="btn btn-outline-warning btn-sm flex-grow-1" onclick="containerAction('{{ container_name }}', 'restart')">
-                                        <i class="fas fa-redo me-1"></i>Restart
+                                    <button type="button" class="container-btn container-btn-restart" onclick="ContainerManager.action('{{ container_name }}', 'restart')">
+                                        <i class="fas fa-redo"></i>
+                                        <span>Restart</span>
                                     </button>
-                                    <button type="button" class="btn btn-outline-info btn-sm flex-grow-1" onclick="containerAction('{{ container_name }}', 'status')">
-                                        <i class="fas fa-info me-1"></i>Status
+                                    <button type="button" class="container-btn container-btn-status" onclick="ContainerManager.action('{{ container_name }}', 'status')">
+                                        <i class="fas fa-info"></i>
+                                        <span>Status</span>
                                     </button>
                                 </div>
                             </div>
@@ -118,255 +122,827 @@
             </div>
         </div>
 
-        <!-- Live Logs -->
         <div class="card mt-4 d-none fade-in" id="streamCard">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0">
                     <i class="fas fa-stream me-2"></i>Live Logs Stream
                     <small class="text-muted ms-2" id="currentContainer"></small>
                 </h5>
-                <div class="d-flex align-items-center">
-                    <span class="connection-status status-disconnected me-2" id="connectionStatus">
+                <div class="d-flex align-items-center gap-2">
+                    <span class="connection-status status-disconnected" id="connectionStatus">
                         <i class="fas fa-circle me-1"></i>Disconnected
                     </span>
-                    <div class="btn-group">
-                        <button type="button" class="btn btn-sm btn-outline-secondary" id="clearLogsBtn">
-                            <i class="fas fa-eraser me-1"></i>Clear
-                        </button>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" id="copyLogsBtn">
-                            <i class="fas fa-copy me-1"></i>Copy
-                        </button>
-                    </div>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="clearLogsBtn">
+                        <i class="fas fa-eraser me-1"></i>Clear
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="copyLogsBtn">
+                        <i class="fas fa-copy me-1"></i>Copy
+                    </button>
                 </div>
             </div>
             <div class="card-body p-0">
                 <div class="log-container" id="liveLogs"></div>
             </div>
         </div>
-
     </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-    const streamBtn = document.getElementById('streamBtn');
-    const stopBtn = document.getElementById('stopBtn');
-    const streamCard = document.getElementById('streamCard');
-    const liveLogs = document.getElementById('liveLogs');
-    const connectionStatus = document.getElementById('connectionStatus');
-    const currentContainer = document.getElementById('currentContainer');
-    const autoScrollCheckbox = document.getElementById('autoScroll');
-    let websocket = null;
+function base64Encode(str) {
+    if (!str) return '';
+    return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g,
+        function(match, p1) {
+            return String.fromCharCode('0x' + p1);
+        }));
+}
 
-    // Toggle password visibility
-    document.getElementById('togglePassword').addEventListener('click', function() {
-        const passwordInput = document.getElementById('password');
-        const type = passwordInput.getAttribute('type') === 'password' ? 'text' : 'password';
-        passwordInput.setAttribute('type', type);
-        this.innerHTML = type === 'password' ? '<i class="fas fa-eye"></i>' : '<i class="fas fa-eye-slash"></i>';
-    });
+function base64Decode(str) {
+    if (!str) return '';
+    try {
+        return decodeURIComponent(atob(str).split('').map(function(c) {
+            return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+        }).join(''));
+    } catch (e) {
+        console.error('Base64 decode error:', e);
+        return 'Decoding Error: Could not retrieve raw output.';
+    }
+}
 
-    // Quick fill button
-    document.getElementById('quickFillBtn').addEventListener('click', function() {
-        document.getElementById('ip').value = '{{ default_host or "" }}';
-        document.getElementById('username').value = '{{ default_username or "" }}';
-        document.getElementById('container').value = '{{ default_container or "" }}';
-        document.getElementById('password').value = '';
-
-        showNotification('Form filled with default values', 'success');
-    });
-
-    // Clear form button
-    document.getElementById('clearFormBtn').addEventListener('click', function() {
-        document.getElementById('logsForm').reset();
-        showNotification('Form cleared', 'info');
-    });
-
-    // Clear logs button
-    document.getElementById('clearLogsBtn').addEventListener('click', function() {
-        liveLogs.innerHTML = '';
-        showNotification('Logs cleared', 'info');
-    });
-
-    // Copy logs button
-    document.getElementById('copyLogsBtn').addEventListener('click', function() {
-        navigator.clipboard.writeText(liveLogs.textContent).then(() => {
-            showNotification('Logs copied to clipboard', 'success');
-        });
-    });
-
-    // Auto-scroll functionality
-    function scrollToBottom() {
-        if (autoScrollCheckbox.checked) {
-            liveLogs.scrollTop = liveLogs.scrollHeight;
-        }
+class WebSocketManager {
+    constructor() {
+        this.websocket = null;
+        this.isConnected = false;
     }
 
-    // Notification system
-    function showNotification(message, type = 'info') {
-        // Remove old notifications
-        document.querySelectorAll('.alert.position-fixed').forEach(alert => {
-            alert.remove();
-        });
-
-        const alert = document.createElement('div');
-        alert.className = `alert alert-${type} alert-dismissible fade show position-fixed`;
-        alert.style.cssText = 'top: 20px; right: 20px; z-index: 1050; min-width: 300px;';
-        alert.innerHTML = `
-            ${message}
-            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-        `;
-        document.body.appendChild(alert);
-
-        setTimeout(() => {
-            if (alert.parentNode) {
-                alert.remove();
-            }
-        }, 5000);
-    }
-
-    // Check container status on load
-    function checkContainerStatus() {
-        ['twitch-bot', 'twitch-db'].forEach(container => {
-            setTimeout(() => {
-                containerAction(container, 'status', true);
-            }, 1000);
-        });
-    }
-
-    // Streaming functionality
-    streamBtn.addEventListener('click', function() {
-        const formData = {
-            ip: document.getElementById('ip').value,
-            username: document.getElementById('username').value,
-            password: document.getElementById('password').value,
-            container: document.getElementById('container').value
-        };
-
-        if (!formData.ip || !formData.username || !formData.container) {
-            showNotification('Please fill all required fields', 'warning');
-            return;
+    connect(formData) {
+        if (this.websocket) {
+            this.disconnect();
         }
 
-        startStreaming(formData);
-    });
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/ws/logs`;
 
-    stopBtn.addEventListener('click', function() {
-        stopStreaming();
-    });
+        this.websocket = new WebSocket(wsUrl);
 
-    function startStreaming(formData) {
+        this.websocket.onopen = () => this.handleOpen(formData);
+        this.websocket.onmessage = (event) => this.handleMessage(event);
+        this.websocket.onclose = () => this.handleClose();
+        this.websocket.onerror = (error) => this.handleError(error);
+    }
+
+    handleOpen(formData) {
+        this.isConnected = true;
+        UI.updateConnectionStatus(true);
+        UI.showStreamCard(formData.container);
+        this.websocket.send(JSON.stringify(formData));
+        Notification.show(`Started streaming logs for ${formData.container}`, 'success');
+    }
+
+    handleMessage(event) {
+        UI.appendLog(event.data);
+    }
+
+    handleClose() {
+        this.isConnected = false;
+        UI.updateConnectionStatus(false);
+        Notification.show('Stream disconnected', 'info');
+    }
+
+    handleError(error) {
+        Notification.show('WebSocket connection error', 'danger');
+        console.error('WebSocket error:', error);
+    }
+
+    disconnect() {
+        if (this.websocket) {
+            this.websocket.close();
+            this.websocket = null;
+        }
+        this.isConnected = false;
+        UI.hideStreamCard();
+    }
+}
+
+class ContainerManager {
+    static async action(containerName, action, silent = false) {
+        const formData = new FormData();
+        ['ip','username','password','container'].forEach(f =>
+            formData.append(f, document.getElementById(f).value));
+        formData.set('container', containerName);
+        formData.set('action', action);
+
+        const resultDiv = document.getElementById('containerResult');
+        const statusBadge = document.getElementById(`status-${containerName}`);
+
+        if (!silent) {
+            UI.showLoadingState(resultDiv, containerName, action);
+        }
+
+        if (!silent) {
+            UI.setButtonsLoadingState(containerName, true);
+        }
+
         try {
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${window.location.host}/ws/logs`;
-            websocket = new WebSocket(wsUrl);
+            const response = await fetch('/container/action', {
+                method: 'POST',
+                body: formData,
+                signal: AbortSignal.timeout(10000)
+            });
 
-            websocket.onopen = function() {
-                streamCard.classList.remove('d-none');
-                connectionStatus.className = 'connection-status status-connected';
-                connectionStatus.innerHTML = '<i class="fas fa-circle me-1"></i>Connected';
-                currentContainer.textContent = `- ${formData.container}`;
-                liveLogs.innerHTML = '';
-                streamBtn.disabled = true;
-                stopBtn.disabled = false;
-                websocket.send(JSON.stringify(formData));
-                showNotification(`Started streaming logs for ${formData.container}`, 'success');
-            };
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
 
-            websocket.onmessage = function(event) {
-                liveLogs.innerHTML += event.data;
-                scrollToBottom();
-            };
+            const data = await response.json();
 
-            websocket.onclose = function() {
-                connectionStatus.className = 'connection-status status-disconnected';
-                connectionStatus.innerHTML = '<i class="fas fa-circle me-1"></i>Disconnected';
-                streamBtn.disabled = false;
-                stopBtn.disabled = true;
-                showNotification('Stream disconnected', 'info');
-            };
-
-            websocket.onerror = function(error) {
-                showNotification('WebSocket connection error', 'danger');
-                console.error('WebSocket error:', error);
-            };
-
+            if (data.status === 'success') {
+                if (action === 'status') {
+                    const statusInfo = this.parseContainerStatus(data.result, containerName);
+                    if (!silent) {
+                        resultDiv.innerHTML = UI.createStatusCard(statusInfo, data.result);
+                    }
+                    UI.updateStatusBadge(statusBadge, statusInfo);
+                } else {
+                    if (!silent) {
+                        UI.showSuccessMessage(resultDiv, containerName, action);
+                    }
+                    setTimeout(() => this.action(containerName, 'status', true), 1500);
+                }
+            } else {
+                if (!silent) {
+                    UI.showErrorMessage(resultDiv, containerName, action, data.result || 'Unknown error');
+                }
+                UI.setErrorStatus(statusBadge);
+            }
         } catch (error) {
-            showNotification('Error starting stream: ' + error.message, 'danger');
+            console.error(`Error in container action ${action} for ${containerName}:`, error);
+
+            if (!silent) {
+                if (error.name === 'TimeoutError' || error.message.includes('Failed to fetch')) {
+                     UI.showConnectionError(resultDiv, containerName, action, error);
+                } else {
+                    UI.showErrorMessage(resultDiv, containerName, action, error.message);
+                }
+            }
+
+            if (statusBadge && action === 'status') {
+                UI.setErrorStatus(statusBadge);
+            }
+        } finally {
+            if (!silent) {
+                UI.setButtonsLoadingState(containerName, false);
+            }
         }
     }
 
-    function stopStreaming() {
-        if (websocket) {
-            websocket.close();
-            websocket = null;
+    static parseContainerStatus(statusOutput, containerName) {
+        const lines = statusOutput.split('\n').filter(line => line.trim());
+        const isRunning = statusOutput.toLowerCase().includes('up');
+
+        let containerId = 'N/A';
+        let image = 'N/A';
+        let created = 'N/A';
+        let ports = 'N/A';
+        let name = containerName;
+        let healthStatus = 'unknown';
+
+        if (lines.length > 1) {
+            const dataLine = lines[1];
+            const parts = dataLine.split(/\s{2,}/).filter(p => p.trim());
+
+            if (parts.length >= 6) {
+                containerId = parts[0].substring(0, 12);
+                image = parts[1];
+                created = parts[3] || 'N/A';
+                ports = parts[5] || 'N/A';
+                name = parts[6] || containerName;
+
+                if (dataLine.includes('(healthy)')) {
+                    healthStatus = 'healthy';
+                } else if (dataLine.includes('(unhealthy)')) {
+                    healthStatus = 'unhealthy';
+                } else if (dataLine.includes('Up') && !dataLine.includes('(healthy)') && !dataLine.includes('(unhealthy)')) {
+                    healthStatus = 'no-check';
+                }
+            }
         }
+
+        return {
+            isRunning,
+            status: isRunning ? 'Running' : 'Stopped',
+            statusClass: isRunning ? 'success' : 'danger',
+            statusIcon: isRunning ? 'fa-play' : 'fa-stop',
+            containerId,
+            image,
+            created,
+            ports,
+            name,
+            healthStatus,
+            healthClass: healthStatus === 'healthy' ? 'success' : healthStatus === 'unhealthy' ? 'danger' : 'secondary',
+            rawOutput: statusOutput
+        };
+    }
+}
+
+class UI {
+    static updateConnectionStatus(connected) {
+        const statusElement = document.getElementById('connectionStatus');
+        if (connected) {
+            statusElement.className = 'connection-status status-connected';
+            statusElement.innerHTML = '<i class="fas fa-circle me-1"></i>Connected';
+        } else {
+            statusElement.className = 'connection-status status-disconnected';
+            statusElement.innerHTML = '<i class="fas fa-circle me-1"></i>Disconnected';
+        }
+    }
+
+    static showStreamCard(containerName) {
+        const streamCard = document.getElementById('streamCard');
+        const currentContainer = document.getElementById('currentContainer');
+        const streamBtn = document.getElementById('streamBtn');
+        const stopBtn = document.getElementById('stopBtn');
+
+        streamCard.classList.remove('d-none');
+        currentContainer.textContent = `- ${containerName}`;
+        document.getElementById('liveLogs').innerHTML = '';
+        streamBtn.disabled = true;
+        stopBtn.disabled = false;
+    }
+
+    static hideStreamCard() {
+        const streamCard = document.getElementById('streamCard');
+        const streamBtn = document.getElementById('streamBtn');
+        const stopBtn = document.getElementById('stopBtn');
+
         streamCard.classList.add('d-none');
         streamBtn.disabled = false;
         stopBtn.disabled = true;
     }
 
-    // Initialize
-    checkContainerStatus();
-});
-
-// Container actions with loading states
-async function containerAction(containerName, action, silent = false) {
-    const formData = new FormData();
-    ['ip','username','password','container'].forEach(f => formData.append(f, document.getElementById(f).value));
-    formData.set('container', containerName);
-    formData.set('action', action);
-
-    const resultDiv = document.getElementById('containerResult');
-    const statusBadge = document.getElementById(`status-${containerName}`);
-
-    if (!silent) {
-        resultDiv.innerHTML = `<div class="alert alert-info">Executing ${action} on ${containerName}...</div>`;
+    static appendLog(logData) {
+        const liveLogs = document.getElementById('liveLogs');
+        liveLogs.innerHTML += logData;
+        this.scrollToBottom();
     }
 
-    // Show loading state on buttons
-    const buttons = document.querySelectorAll(`button[onclick*="${containerName}"]`);
-    buttons.forEach(btn => btn.classList.add('btn-loading'));
+    static scrollToBottom() {
+        const autoScroll = document.getElementById('autoScroll');
+        const liveLogs = document.getElementById('liveLogs');
+        if (autoScroll.checked) {
+            liveLogs.scrollTop = liveLogs.scrollHeight;
+        }
+    }
 
-    try {
-        const response = await fetch('/container/action', { method: 'POST', body: formData });
-        const data = await response.json();
+    static showLoadingState(resultDiv, containerName, action) {
+        resultDiv.innerHTML = `
+            <div class="alert alert-info d-flex align-items-center">
+                <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+                Executing ${action} on <strong class="mx-1">${containerName}</strong>...
+            </div>
+        `;
+    }
 
-        if (data.status === 'success') {
-            if (!silent) {
-                resultDiv.innerHTML = `<div class="alert alert-success"><strong>Success:</strong> ${action} executed on ${containerName}<pre class="mt-2 mb-0">${data.result}</pre></div>`;
+    static setButtonsLoadingState(containerName, loading) {
+        const buttons = document.querySelectorAll(`.container-btn[onclick*="${containerName}"]`);
+        buttons.forEach(btn => {
+            if (loading) {
+                btn.classList.add('btn-loading');
+            } else {
+                btn.classList.remove('btn-loading');
             }
+        });
+    }
 
-            // Update status badge
-            if (action === 'status') {
-                const isRunning = data.result.toLowerCase().includes('up');
-                statusBadge.className = `badge ${isRunning ? 'bg-success' : 'bg-danger'}`;
-                statusBadge.innerHTML = `<i class="fas ${isRunning ? 'fa-play' : 'fa-stop'} me-1"></i>${isRunning ? 'Running' : 'Stopped'}`;
-            }
+    static updateStatusBadge(statusBadge, statusInfo) {
+        statusBadge.className = `badge ${statusInfo.isRunning ? 'bg-success' : 'bg-danger'}`;
+        statusBadge.innerHTML = `<i class="fas ${statusInfo.isRunning ? 'fa-play' : 'fa-stop'} me-1"></i>${statusInfo.isRunning ? 'Running' : 'Stopped'}`;
+    }
 
-            if (['start', 'stop', 'restart'].includes(action)) {
-                // Refresh status after action
-                setTimeout(() => containerAction(containerName, 'status', true), 1000);
-            }
+    static setErrorStatus(statusBadge) {
+        statusBadge.className = 'badge bg-warning';
+        statusBadge.innerHTML = '<i class="fas fa-exclamation-triangle me-1"></i>Error';
+    }
 
+    static showSuccessMessage(resultDiv, containerName, action) {
+        resultDiv.innerHTML = `
+            <div class="alert alert-success">
+                <div class="d-flex align-items-center">
+                    <i class="fas fa-check-circle text-success me-2"></i>
+                    <div>
+                        <strong>Success!</strong> ${action} executed on <strong>${containerName}</strong>
+                        <div class="mt-2">
+                            <button class="btn btn-sm btn-outline-info" onclick="ContainerManager.action('${containerName}', 'status')">
+                                <i class="fas fa-sync me-1"></i>Refresh Status
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    static showErrorMessage(resultDiv, containerName, action, error) {
+        resultDiv.innerHTML = `
+            <div class="alert alert-danger">
+                <div class="d-flex align-items-center">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    <div>
+                        <strong>Error executing ${action} on ${containerName}:</strong>
+                        <div class="mt-1 font-monospace small">${error}</div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    static showConnectionError(resultDiv, containerName, action, error) {
+        resultDiv.innerHTML = `
+            <div class="alert alert-danger">
+                <div class="d-flex align-items-center">
+                    <i class="fas fa-unlink me-2"></i>
+                    <div>
+                        <strong>Connection Error:</strong> Failed to execute ${action} on ${containerName}
+                        <div class="mt-1 small text-muted">${error.message}</div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    static createStatusCard(statusInfo, rawOutput) {
+        const statusColor = statusInfo.isRunning ? 'success' : 'danger';
+        const uptimeInfo = statusInfo.isRunning ? this.extractUptime(statusInfo.rawOutput) : null;
+
+        let healthIcon, healthColor, healthText;
+        if (statusInfo.healthStatus === 'healthy') {
+            healthIcon = 'fa-heart';
+            healthColor = 'success';
+            healthText = 'Healthy';
+        } else if (statusInfo.healthStatus === 'unhealthy') {
+            healthIcon = 'fa-heart-broken';
+            healthColor = 'danger';
+            healthText = 'Unhealthy';
         } else {
-            if (!silent) {
-                resultDiv.innerHTML = `<div class="alert alert-danger"><strong>Error:</strong> ${data.result}</div>`;
-            }
-            statusBadge.className = 'badge bg-warning';
-            statusBadge.innerHTML = '<i class="fas fa-exclamation-triangle me-1"></i>Error';
+            healthIcon = 'fa-question-circle';
+            healthColor = 'secondary';
+            healthText = 'No Healthcheck';
         }
-    } catch (error) {
-        if (!silent) {
-            resultDiv.innerHTML = `<div class="alert alert-danger"><strong>Request Error:</strong> ${error}</div>`;
+
+        const encodedRawOutput = base64Encode(rawOutput);
+
+        return `
+            <div class="card border-${statusColor}" data-raw-output="${encodedRawOutput}">
+                <div class="card-header bg-${statusColor} bg-opacity-10 d-flex justify-content-between align-items-center">
+                    <h6 class="mb-0">
+                        <i class="fas ${statusInfo.statusIcon} text-${statusColor} me-2"></i>
+                        Container Status: <strong>${statusInfo.name}</strong>
+                    </h6>
+                    <div class="d-flex gap-2 align-items-center">
+                        <span class="badge bg-${statusColor}">
+                            <i class="fas ${statusInfo.statusIcon} me-1"></i>${statusInfo.status}
+                        </span>
+                        <span class="badge bg-${healthColor}">
+                            <i class="fas ${healthIcon} me-1"></i>${healthText}
+                        </span>
+                        <button class="btn btn-sm btn-outline-danger" onclick="this.closest('.card').remove()">
+                            <i class="fas fa-times me-1"></i>Close
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <div class="d-flex align-items-center mb-2">
+                                <i class="fas fa-id-card text-primary me-2"></i>
+                                <strong>ID:</strong>
+                                <span class="ms-2 font-monospace">${statusInfo.containerId}</span>
+                            </div>
+                            <div class="d-flex align-items-center mb-2">
+                                <i class="fas fa-box text-info me-2"></i>
+                                <strong>Image:</strong>
+                                <span class="ms-2 text-truncate">${statusInfo.image}</span>
+                            </div>
+                            <div class="d-flex align-items-center mb-2">
+                                <i class="fas fa-clock text-warning me-2"></i>
+                                <strong>Created:</strong>
+                                <span class="ms-2">${statusInfo.created}</span>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="d-flex align-items-center mb-2">
+                                <i class="fas fa-plug text-success me-2"></i>
+                                <strong>Ports:</strong>
+                                <span class="ms-2 font-monospace small">${statusInfo.ports}</span>
+                            </div>
+                            ${uptimeInfo ? `
+                            <div class="d-flex align-items-center mb-2">
+                                <i class="fas fa-hourglass-half text-info me-2"></i>
+                                <strong>Uptime:</strong>
+                                <span class="ms-2 text-success">${uptimeInfo}</span>
+                            </div>
+                            ` : ''}
+                            <div class="d-flex align-items-center">
+                                <i class="fas fa-microchip text-secondary me-2"></i>
+                                <strong>Status:</strong>
+                                <span class="ms-2 badge bg-${statusInfo.statusClass}">${statusInfo.status}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    ${!statusInfo.isRunning ? `
+                    <div class="alert alert-warning mt-3 mb-0">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        Container is currently stopped. Use <strong>Start</strong> button to run it.
+                    </div>
+                    ` : ''}
+
+                    <div class="mt-3 d-flex gap-2">
+                        <button class="btn btn-sm btn-outline-primary" onclick="ContainerManager.action('${statusInfo.name}', 'status')">
+                            <i class="fas fa-sync me-1"></i>Refresh
+                        </button>
+                        <button class="btn btn-sm btn-outline-info raw-output-btn" data-container="${statusInfo.name}">
+                            <i class="fas fa-code me-1"></i>Raw Output
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    static extractUptime(rawOutput) {
+        const uptimeMatch = rawOutput.match(/Up\s+((?:\d+\s+\w+\s*)+)/i);
+        if (uptimeMatch) {
+            return uptimeMatch[1].trim();
         }
-    } finally {
-        // Remove loading state
-        const buttons = document.querySelectorAll(`button[onclick*="${containerName}"]`);
-        buttons.forEach(btn => btn.classList.remove('btn-loading'));
+
+        const relativeMatch = rawOutput.match(/Up\s+(About\s+(?:an?\s+)?\w+\s+(?:ago|minute|hour))/i);
+        if (relativeMatch) {
+            return relativeMatch[1].trim();
+        }
+
+        const aboutMatch = rawOutput.match(/Up\s+(About\s+.*?)(?=\s|$)/i);
+        if (aboutMatch) {
+            return aboutMatch[1].trim();
+        }
+
+        return 'Unknown';
     }
 }
+
+class Notification {
+    static show(message, type = 'info') {
+        const notification = document.createElement('div');
+        notification.className = `alert alert-${type} alert-dismissible fade show position-fixed`;
+        notification.style.cssText = 'top: 20px; right: 20px; z-index: 1050; min-width: 300px;';
+        notification.innerHTML = `
+            ${message}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        `;
+
+        document.body.appendChild(notification);
+
+        setTimeout(() => {
+            if (notification.parentNode) {
+                notification.remove();
+            }
+        }, 5000);
+    }
+}
+
+class ClipboardManager {
+    static async copyLogs() {
+        try {
+            const logsText = document.getElementById('liveLogs').textContent || document.getElementById('liveLogs').innerText;
+
+            if (!logsText.trim()) {
+                Notification.show('No logs to copy', 'warning');
+                return;
+            }
+
+            if (navigator.clipboard && window.isSecureContext) {
+                await navigator.clipboard.writeText(logsText);
+                Notification.show('Logs copied to clipboard!', 'success');
+            } else {
+                await this.fallbackCopy(logsText);
+                Notification.show('Logs copied to clipboard!', 'success');
+
+            }
+        } catch (error) {
+            console.error('Copy error:', error);
+            Notification.show('Copy failed: ' + error.message, 'danger');
+            this.manualCopyFallback();
+        }
+    }
+
+    static async copyRawOutput(button) {
+        const text = button.getAttribute('data-text');
+        try {
+            if (navigator.clipboard && window.isSecureContext) {
+                await navigator.clipboard.writeText(text);
+                Notification.show('Raw output copied to clipboard!', 'success');
+            } else {
+                await this.fallbackCopy(text);
+            }
+        } catch (error) {
+            console.error('Copy error:', error);
+            Notification.show('Copy failed: ' + error.message, 'danger');
+        }
+    }
+
+    static fallbackCopy(text) {
+        return new Promise((resolve, reject) => {
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            textarea.style.position = 'fixed';
+            textarea.style.left = '-999999px';
+            textarea.style.top = '-999999px';
+            document.body.appendChild(textarea);
+            textarea.focus();
+            textarea.select();
+
+            try {
+                const successful = document.execCommand('copy');
+                document.body.removeChild(textarea);
+
+                if (successful) {
+                    resolve();
+                } else {
+                    reject(new Error('execCommand copy failed'));
+                }
+            } catch (err) {
+                document.body.removeChild(textarea);
+                reject(err);
+            }
+        });
+    }
+
+    static manualCopyFallback() {
+        const logsText = document.getElementById('liveLogs').textContent || document.getElementById('liveLogs').innerText;
+        if (logsText.length < 1000) {
+            alert('Copy failed. Here are the logs to copy manually:\n\n' + logsText);
+        } else {
+            alert('Copy failed. Logs are too long to display. Please try another method.');
+        }
+    }
+}
+
+class FormManager {
+    static quickFill() {
+        document.getElementById('ip').value = '{{ default_host or "" }}';
+        document.getElementById('username').value = '{{ default_username or "" }}';
+        document.getElementById('container').value = '{{ default_container or "" }}';
+        document.getElementById('password').value = '';
+        Notification.show('Form filled with default values', 'success');
+    }
+
+    static clear() {
+        document.getElementById('logsForm').reset();
+        Notification.show('Form cleared', 'info');
+    }
+
+    static clearLogs() {
+        document.getElementById('liveLogs').innerHTML = '';
+        Notification.show('Logs cleared', 'info');
+    }
+
+    static togglePassword() {
+        const passwordInput = document.getElementById('password');
+        const toggleButton = document.getElementById('togglePassword');
+        const type = passwordInput.getAttribute('type') === 'password' ? 'text' : 'password';
+        passwordInput.setAttribute('type', type);
+        toggleButton.innerHTML = type === 'password' ? '<i class="fas fa-eye"></i>' : '<i class="fas fa-eye-slash"></i>';
+    }
+}
+
+class RawOutputManager {
+    static show(containerName, rawOutput) {
+        const resultDiv = document.getElementById('containerResult');
+        const existingRawOutput = resultDiv.querySelector('.raw-output-card');
+
+        if (existingRawOutput) {
+            existingRawOutput.remove();
+            return;
+        }
+
+        const displayOutput = this.escapeHtml(rawOutput);
+        const rawOutputCard = document.createElement('div');
+        rawOutputCard.className = 'card mt-3 raw-output-card border-info';
+        rawOutputCard.innerHTML = `
+            <div class="card-header bg-info bg-opacity-10 d-flex justify-content-between align-items-center">
+                <h6 class="mb-0">
+                    <i class="fas fa-code me-2"></i>
+                    Raw Output for ${containerName}
+                </h6>
+                <div>
+                    <button class="btn btn-sm btn-outline-secondary me-2" onclick="ClipboardManager.copyRawOutput(this)">
+                        <i class="fas fa-copy me-1"></i>Copy
+                    </button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="this.closest('.raw-output-card').remove()">
+                        <i class="fas fa-times me-1"></i>Close
+                    </button>
+                </div>
+            </div>
+            <div class="card-body p-0">
+                <pre class="mb-0 small font-monospace bg-dark text-light p-3 rounded" style="max-height: 300px; overflow: auto; white-space: pre-wrap;">${displayOutput}</pre>
+            </div>
+        `;
+
+        const copyButton = rawOutputCard.querySelector('button');
+        if (copyButton) {
+            copyButton.setAttribute('data-text', this.escapeHtmlForAttribute(rawOutput));
+        }
+
+        resultDiv.appendChild(rawOutputCard);
+    }
+
+    static escapeHtml(unsafe) {
+        if (!unsafe) return '';
+        return unsafe
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+
+    static escapeHtmlForAttribute(unsafe) {
+        if (!unsafe) return '';
+        return unsafe.replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+    }
+
+    static handleRawOutputClick(e) {
+        const btn = e.target.closest('.raw-output-btn');
+        if (!btn) return;
+
+        const card = btn.closest('.card[data-raw-output]');
+        if (!card) return;
+
+        const rawOutputBase64 = card.getAttribute('data-raw-output');
+        const containerName = btn.getAttribute('data-container');
+
+        if (!rawOutputBase64) {
+            this.show(containerName, "No raw output available");
+            return;
+        }
+
+        try {
+            const rawOutput = base64Decode(rawOutputBase64);
+            this.show(containerName, rawOutput);
+        } catch (e) {
+            console.error('Raw Output decoding failed:', e);
+            this.show(containerName, `Error decoding raw output: ${e.message}`);
+        }
+    }
+}
+
+class App {
+    static init() {
+        this.webSocketManager = new WebSocketManager();
+        this.cacheElements();
+        this.bindEvents();
+        setTimeout(() => {
+            this.checkContainerStatus();
+        }, 500);
+    }
+
+    static cacheElements() {
+        this.elements = {
+            togglePassword: document.getElementById('togglePassword'),
+            quickFillBtn: document.getElementById('quickFillBtn'),
+            clearFormBtn: document.getElementById('clearFormBtn'),
+            clearLogsBtn: document.getElementById('clearLogsBtn'),
+            copyLogsBtn: document.getElementById('copyLogsBtn'),
+            logsForm: document.getElementById('logsForm'),
+            getLogsBtn: document.getElementById('getLogsBtn'),
+            streamBtn: document.getElementById('streamBtn'),
+            stopBtn: document.getElementById('stopBtn'),
+            checkStatusBtn: document.getElementById('checkStatusBtn'),
+            ip: document.getElementById('ip'),
+            username: document.getElementById('username'),
+            password: document.getElementById('password'),
+            container: document.getElementById('container'),
+        };
+        this.containers = ['bot', 'db', 'nginx', 'admin'];
+    }
+
+    static bindEvents() {
+        const e = this.elements;
+
+        e.togglePassword.addEventListener('click', FormManager.togglePassword);
+        e.quickFillBtn.addEventListener('click', FormManager.quickFill);
+        e.clearFormBtn.addEventListener('click', FormManager.clear);
+        e.clearLogsBtn.addEventListener('click', FormManager.clearLogs);
+        e.copyLogsBtn.addEventListener('click', () => ClipboardManager.copyLogs());
+
+        document.addEventListener('click', (e) => RawOutputManager.handleRawOutputClick(e));
+
+        e.getLogsBtn.addEventListener('click', ev => {
+            ev.preventDefault();
+            const data = this.getFormData();
+            if (!this.validateFormData(data)) return Notification.show('Please fill all required fields', 'warning');
+            e.logsForm.submit();
+        });
+
+        e.checkStatusBtn.addEventListener('click', ev => {
+            ev.preventDefault();
+            this.checkContainerStatus(true);
+        });
+
+        e.streamBtn.addEventListener('click', () => {
+            const data = this.getFormData();
+            if (!this.validateFormData(data)) return Notification.show('Please fill all required fields', 'warning');
+            this.webSocketManager.connect(data);
+        });
+
+        e.stopBtn.addEventListener('click', () => this.webSocketManager.disconnect());
+    }
+
+    static getFormData() {
+        const e = this.elements;
+        return {
+            ip: e.ip.value,
+            username: e.username.value,
+            password: e.password.value,
+            container: e.container.value
+        };
+    }
+
+    static validateFormData({ ip, username, container }) {
+        return ip && username && container;
+    }
+
+    static async checkContainerStatus(force = false) {
+        const data = this.getFormData();
+
+        if (!data.ip || !data.username) {
+            if (force) {
+                Notification.show('Please fill Host IP and Username fields to check container status', 'warning');
+            }
+            return;
+        }
+
+        const btn = this.elements.checkStatusBtn;
+        const originalText = btn.innerHTML;
+
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Checking...';
+        btn.disabled = true;
+
+        if (force) {
+            Notification.show('Checking container status...', 'info');
+        }
+
+        try {
+            await this.checkContainersAllAtOnce(data);
+            if (force) {
+                Notification.show('Container status updated successfully', 'success');
+            }
+        } catch (err) {
+            console.error('Error checking container status:', err);
+            if (force) {
+                Notification.show(`Failed: ${err.message}`, 'error');
+            }
+        } finally {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
+    }
+
+    static async checkContainersAllAtOnce(formData) {
+        const containers = this.containers;
+
+        const originalValues = {};
+        ['ip', 'username', 'password', 'container'].forEach(key => {
+            originalValues[key] = this.elements[key].value;
+            this.elements[key].value = formData[key];
+        });
+
+        try {
+            const promises = containers.map(c => this.checkSingleContainerWithTimeout(c));
+            await Promise.allSettled(promises);
+        } finally {
+            Object.entries(originalValues).forEach(([key, val]) => {
+                this.elements[key].value = val;
+            });
+        }
+    }
+
+
+    static checkSingleContainerWithTimeout(container) {
+        return new Promise(resolve => {
+            let done = false;
+
+            const timeoutId = setTimeout(() => {
+                if (!done) { done = true; console.warn(`Timeout for ${container}`); resolve(); }
+            }, 5000);
+
+            ContainerManager.action(container, 'status', true)
+                .then(() => { if (!done) { done = true; clearTimeout(timeoutId); resolve(); } })
+                .catch(err => { if (!done) { done = true; clearTimeout(timeoutId); console.error(err); resolve(); } });
+        });
+    }
+}
+document.addEventListener('DOMContentLoaded', () => App.init());
 </script>
 {% endblock %}

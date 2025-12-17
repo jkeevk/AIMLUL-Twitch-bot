@@ -1,29 +1,26 @@
-"""FastAPI route handlers for Docker container management."""
-
 import logging
 import time
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from app.config import settings
-from app.dependencies import get_client_ip, get_current_user_optional, verify_token
+from app.dependencies import get_client_ip, get_current_user_optional
 from app.models import SSHConnectionRequest
 from app.security import create_token, login_attempts
-from app.ssh_client import SSHClientWrapper, ssh_command_context
-from app.websocket_manager import websocket_manager
-from fastapi import APIRouter, Depends, Form, Request, WebSocket, WebSocketDisconnect, status
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
+from app.services.ssh_client import AsyncSSHWrapper
+from app.services.websocket_manager import websocket_manager
+from app.utils.jinja_setup import templates
+from fastapi import APIRouter, Form, Request, WebSocket, WebSocketDisconnect, status
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-templates = Jinja2Templates(directory="app/templates")
 
-
-@router.get("/", response_class=HTMLResponse, response_model=None)  # type: ignore[misc]
-async def root(request: Request) -> RedirectResponse | HTMLResponse:
-    """Main application page.
+@router.get("/", response_class=HTMLResponse)
+async def root(request: Request) -> Response:
+    """
+    Main application page.
 
     Args:
         request: FastAPI request object.
@@ -31,10 +28,9 @@ async def root(request: Request) -> RedirectResponse | HTMLResponse:
     Returns:
         RedirectResponse or HTMLResponse: Redirect to login or rendered index page.
     """
-    user = get_current_user_optional(request)
+    user = await get_current_user_optional(request)
     if not user:
         return RedirectResponse("/login")
-
     return templates.TemplateResponse(
         "index.html",
         {
@@ -48,7 +44,7 @@ async def root(request: Request) -> RedirectResponse | HTMLResponse:
     )
 
 
-@router.get("/login", response_class=HTMLResponse)  # type: ignore[misc]
+@router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request) -> HTMLResponse:
     """Render login page.
 
@@ -61,11 +57,14 @@ async def login_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse("login.html", {"request": request})
 
 
-@router.post("/login", response_model=None)  # type: ignore[misc]
+@router.post("/login", response_model=None)
 async def login_post(
-    request: Request, username: str = Form(...), password: str = Form(...)
-) -> RedirectResponse | HTMLResponse:
-    """Authenticate user and set session cookie.
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+) -> Response:
+    """
+    Authenticate user and set session cookie.
 
     Args:
         request: FastAPI request object.
@@ -76,42 +75,74 @@ async def login_post(
         RedirectResponse or HTMLResponse: Redirect to index on success, login page on failure.
     """
     client_ip = get_client_ip(request)
+    await login_attempts.cleanup_old_attempts()
 
-    if int(time.time()) % 300 == 0:
-        login_attempts.cleanup_old_attempts()
+    if await login_attempts.is_blocked(client_ip):
+        async with login_attempts.lock:
+            attempt = login_attempts.attempts.get(client_ip, {})
+            blocked_until = attempt.get("blocked_until", 0)
+            remaining_sec = max(int(blocked_until - time.time()), 0)
+            minutes, seconds = divmod(remaining_sec, 60)
 
-    if login_attempts.is_blocked(username, client_ip):
         return templates.TemplateResponse(
             "login.html",
-            {"request": request, "error": "Too many failed login attempts. Please try again in 15 minutes."},
+            {
+                "request": request,
+                "error": f"Too many failed login attempts. Try again in {minutes} min {seconds} sec.",
+                "username": username,
+                "lock_seconds": remaining_sec,
+            },
         )
 
     if username == settings.auth_username and password == settings.auth_password:
-        login_attempts.clear_attempts(username, client_ip)
+        await login_attempts.clear_attempts(client_ip)
         token = create_token(username)
         resp = RedirectResponse("/", status_code=status.HTTP_302_FOUND)
         resp.set_cookie(
-            "session", token, httponly=True, secure=False, samesite="lax", max_age=settings.session_timeout_minutes * 60
+            "session",
+            token,
+            httponly=True,
+            secure=False,
+            samesite="lax",
+            max_age=settings.session_duration_minutes * 60,
         )
         return resp
 
-    login_attempts.failed_attempt(username, client_ip)
-    return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid credentials"})
+    await login_attempts.failed_attempt(client_ip)
+    remaining_attempts = max(
+        0, settings.max_login_attempts - login_attempts.attempts.get(client_ip, {}).get("count", 0)
+    )
+    error_msg = "Invalid username or password."
+    if remaining_attempts > 0:
+        error_msg += f" Remaining attempts: {remaining_attempts}"
+    else:
+        error_msg += " This was your last attempt before temporary lock."
+
+    return templates.TemplateResponse(
+        "login.html",
+        {
+            "request": request,
+            "error": error_msg,
+            "username": username,
+            "lock_seconds": 0,
+        },
+    )
 
 
-@router.get("/logout")  # type: ignore[misc]
+@router.get("/logout")
 async def logout() -> RedirectResponse:
     """Logout user by clearing session cookie.
 
     Returns:
         RedirectResponse: Redirect to login page.
     """
+    await websocket_manager.cleanup()
     resp = RedirectResponse("/login")
     resp.delete_cookie("session")
     return resp
 
 
-@router.post("/logs", response_class=HTMLResponse)  # type: ignore[misc]
+@router.post("/logs", response_class=HTMLResponse)
 async def fetch_logs(
     request: Request,
     ip: str = Form(...),
@@ -119,7 +150,6 @@ async def fetch_logs(
     password: str = Form(""),
     container: str = Form(...),
     lines: int = Form(200),
-    user: str = Depends(verify_token),
 ) -> HTMLResponse:
     """Fetch Docker container logs via SSH.
 
@@ -130,7 +160,6 @@ async def fetch_logs(
         password: SSH password.
         container: Docker container name.
         lines: Number of log lines to fetch.
-        user: Authenticated username.
 
     Returns:
         HTMLResponse: Rendered logs page with container logs.
@@ -149,9 +178,12 @@ async def fetch_logs(
             },
         )
 
-    with ssh_command_context(ip, username, f"docker logs --tail {lines} {container}"):
-        with SSHClientWrapper(ip, username, password) as ssh:
-            logs = ssh.exec(f"docker logs --tail {lines} {container}")
+    cmd = f"docker logs --tail {lines} {container} 2>&1"
+    try:
+        async with AsyncSSHWrapper(ip, username, password) as ssh:
+            logs = await ssh.exec(cmd)
+    except Exception as e:
+        logs = f"SSH Connection Error: {e}"
 
     return templates.TemplateResponse(
         "logs.html",
@@ -165,26 +197,22 @@ async def fetch_logs(
     )
 
 
-@router.post("/container/action")  # type: ignore[misc]
+@router.post("/container/action")
 async def container_action(
-    request: Request,
     ip: str = Form(...),
     username: str = Form(...),
     password: str = Form(""),
     container: str = Form(...),
     action: str = Form(...),
-    user: str = Depends(verify_token),
 ) -> JSONResponse:
     """Execute Docker container actions via SSH.
 
     Args:
-        request: FastAPI request object.
         ip: SSH host IP address.
         username: SSH username.
         password: SSH password.
         container: Docker container name.
         action: Action to perform (start, stop, restart, status, stats, logs, inspect).
-        user: Authenticated username.
 
     Returns:
         JSONResponse: Action result with status and output data.
@@ -205,14 +233,15 @@ async def container_action(
             status_code=status.HTTP_400_BAD_REQUEST, content={"status": "error", "result": "Unknown action"}
         )
 
-    with ssh_command_context(ip, username, cmd):
-        with SSHClientWrapper(ip, username, password) as ssh:
-            result = ssh.exec(cmd)
+    try:
+        async with AsyncSSHWrapper(ip, username, password) as ssh:
+            result = await ssh.exec(cmd)
+        return JSONResponse({"status": "success", "result": result})
+    except Exception as e:
+        return JSONResponse({"status": "error", "result": str(e)}, status_code=500)
 
-    return JSONResponse({"status": "success", "result": result})
 
-
-@router.websocket("/ws/logs")  # type: ignore[misc]
+@router.websocket("/ws/logs")
 async def websocket_logs(websocket: WebSocket) -> None:
     """WebSocket endpoint for live Docker logs streaming.
 
@@ -220,41 +249,36 @@ async def websocket_logs(websocket: WebSocket) -> None:
         websocket: WebSocket connection for real-time log streaming.
     """
     connection_id = str(uuid.uuid4())
+    await websocket_manager.connect(websocket, connection_id)
 
     try:
-        await websocket_manager.connect(websocket, connection_id)
         data = await websocket.receive_json()
-
-        required_fields = ["ip", "username", "container"]
-        for field in required_fields:
+        for field in ["ip", "username", "container"]:
             if field not in data:
                 await websocket.send_text(f"Missing required field: {field}")
                 return
-
-        websocket_manager.connection_info[connection_id].update(
-            {"ip": data["ip"], "container": data["container"], "username": data["username"]}
-        )
-
-        logger.info("Starting log stream for %s on %s", data["container"], data["ip"])
-        await websocket_manager.stream_docker_logs(connection_id, data)
-
+        await websocket_manager.stream_logs(connection_id, data)
     except WebSocketDisconnect:
-        logger.info("WebSocket disconnected normally: %s", connection_id)
+        logger.info(f"WebSocket disconnected: {connection_id}")
     except Exception as exc:
-        logger.error("WebSocket error %s: %s", connection_id, exc)
+        logger.error(f"WebSocket error {connection_id}: {exc}")
         try:
             await websocket.send_text(f"Connection error: {exc}")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"WebSocket error {connection_id}: {e}")
     finally:
         websocket_manager.disconnect(connection_id)
+        try:
+            await websocket.close()
+        except Exception as e:
+            logger.error(f"WebSocket error {connection_id}: {e}")
 
 
-@router.get("/health")  # type: ignore[misc]
+@router.get("/health")
 async def health_check() -> JSONResponse:
     """Health check endpoint for service monitoring.
 
     Returns:
         JSONResponse: Service status information with timestamp and version.
     """
-    return JSONResponse(content={"status": "healthy", "timestamp": datetime.utcnow().isoformat(), "version": "1.0.0"})
+    return JSONResponse(content={"status": "healthy", "timestamp": datetime.now(UTC).isoformat(), "version": "1.0.0"})

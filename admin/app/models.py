@@ -1,7 +1,7 @@
 import ipaddress
-from datetime import datetime
+from datetime import UTC, datetime
 
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class SSHConnectionRequest(BaseModel):
@@ -20,13 +20,13 @@ class SSHConnectionRequest(BaseModel):
     password: str = ""
     container: str
 
-    @validator("ip")
-    def validate_ip(cls, v: str) -> str:
+    @field_validator("ip")
+    def validate_ip(cls, value: str) -> str:
         """
         Validate IP address format.
 
         Args:
-            v (str): IP address string.
+            value (str): IP address string.
 
         Returns:
             str: Validated IP address.
@@ -35,10 +35,10 @@ class SSHConnectionRequest(BaseModel):
             ValueError: If IP address format is invalid.
         """
         try:
-            ipaddress.ip_address(v)
-            return v
+            ipaddress.ip_address(value)
         except ValueError:
             raise ValueError("Invalid IP address format") from None
+        return value
 
 
 class ErrorResponse(BaseModel):
@@ -53,4 +53,4 @@ class ErrorResponse(BaseModel):
 
     error: str
     details: str | None = None
-    timestamp: str = datetime.utcnow().isoformat()
+    timestamp: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())

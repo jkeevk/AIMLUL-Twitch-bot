@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import os
 from contextlib import suppress
@@ -8,7 +7,6 @@ from twitchio import Message
 from twitchio.ext import commands
 
 from src.api.twitch_api import TwitchAPI
-from src.bot.token_refresh import periodic_refresh
 from src.commands.command_handler import CommandHandler
 from src.commands.permissions import is_admin
 from src.commands.triggers.text_triggers import build_triggers
@@ -32,7 +30,6 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
     command_handler: CommandHandler
     eventsub: EventSubManager
     triggers: dict[str, Any]
-    token_refresh_task: asyncio.Task[None] | None
 
     def __init__(self, token_manager: TokenManager, bot_token: str) -> None:
         """
@@ -63,6 +60,7 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
         self.eventsub = EventSubManager(self)
         self.triggers = build_triggers(self)
         self.token_refresh_task = None
+        self.is_connected: bool = False
 
     async def event_token_expired(self) -> str | None:
         """
@@ -82,6 +80,7 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
     async def event_ready(self) -> None:
         """Called when the bot is ready and connected to Twitch."""
         logger.info("Bot ready")
+        self.is_connected = True
 
         if self.db:
             try:
@@ -91,9 +90,6 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
                 self.db = None
 
         await self.eventsub.setup()
-
-        if not self.token_refresh_task:
-            self.token_refresh_task = asyncio.create_task(periodic_refresh(self))
 
     async def event_message(self, message: Message) -> None:
         """
@@ -105,7 +101,7 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
         if message.echo:
             return
 
-        text: str = message.content.lower()
+        text = message.content.lower()
 
         for kw in self.triggers["gnome_keywords"]:
             if kw in text:
@@ -129,38 +125,31 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
         """
         await handle_eventsub_reward(event, self)
 
-    @commands.command(name="жопа")  # type: ignore[misc]
+    @commands.command(name="жопа")
     async def butt(self, ctx: commands.Context) -> None:
         """Handle the butt command."""
         if self.active:
             await self.command_handler.handle_butt(ctx)
 
-    @commands.command(name="дрын")  # type: ignore[misc]
+    @commands.command(name="дрын")
     async def club(self, ctx: commands.Context) -> None:
         """Handle the club command."""
         if self.active:
             await self.command_handler.handle_club(ctx)
 
-    @commands.command(name="бочка")  # type: ignore[misc]
-    async def test_barrel(self, ctx: commands.Context) -> None:
-        """Handle the test barrel command (admin only)."""
-        if not is_admin(self, ctx.author.name):
-            return
-        await self.command_handler.handle_barrel(ctx)
-
-    @commands.command(name="я")  # type: ignore[misc]
+    @commands.command(name="я")
     async def me(self, ctx: commands.Context) -> None:
         """Handle the me command to show user stats."""
         if self.active:
             await self.command_handler.handle_me(ctx)
 
-    @commands.command(name="топ")  # type: ignore[misc]
+    @commands.command(name="топ")
     async def leaders(self, ctx: commands.Context) -> None:
         """Handle the leaders command to show top users."""
         if self.active:
             await self.command_handler.handle_leaders(ctx)
 
-    @commands.command(name="ботзаткнись")  # type: ignore[misc]
+    @commands.command(name="ботзаткнись")
     async def bot_sleep(self, ctx: commands.Context) -> None:
         """Deactivate the bot (admin only)."""
         if not is_admin(self, ctx.author.name):
@@ -168,7 +157,7 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
         self.active = False
         await ctx.send("banka Алибидерчи! Бот выключен.")
 
-    @commands.command(name="ботговори")  # type: ignore[misc]
+    @commands.command(name="ботговори")
     async def bot_wake(self, ctx: commands.Context) -> None:
         """Activate the bot (admin only)."""
         if not is_admin(self, ctx.author.name):
@@ -179,13 +168,19 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
     async def close(self) -> None:
         """Clean up resources and close the bot gracefully."""
         logger.info("Shutdown...")
+        self.is_connected = False
 
-        if self.token_refresh_task:
-            self.token_refresh_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await self.token_refresh_task
+        with suppress(Exception):
+            await self.eventsub.close()
+
+        with suppress(Exception):
+            await self.api.close()
 
         if self.db:
-            await self.db.close()
+            with suppress(Exception):
+                await self.db.close()
 
-        await super().close()
+        with suppress(Exception):
+            await super().close()
+
+        logger.info("TwitchBot closed")

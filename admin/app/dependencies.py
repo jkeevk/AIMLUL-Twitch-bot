@@ -1,8 +1,9 @@
 from app.security import decode_token
 from fastapi import HTTPException, Request, status
+from fastapi.responses import RedirectResponse
 
 
-def get_current_user_optional(request: Request) -> str | None:
+async def get_current_user_optional(request: Request) -> str | None:
     """
     Retrieve current user from JWT cookie if it exists.
 
@@ -13,26 +14,37 @@ def get_current_user_optional(request: Request) -> str | None:
         str | None: Username if authenticated, None otherwise.
     """
     token = request.cookies.get("session")
-    return decode_token(token) if token else None
+    if token:
+        return decode_token(token)
+    return None
 
 
-def verify_token(request: Request) -> str:
+async def verify_token(request: Request) -> str | RedirectResponse:
     """
-    FastAPI dependency to verify that the user is authenticated.
+    Verify user token and handle expired sessions.
 
-    Args:
-        request (Request): FastAPI request object.
+    This function handles expired or unauthenticated sessions differently
+    for HTML pages vs API requests:
+
+    - HTML requests: redirect to /login
+    - API requests: raise 401 Unauthorized
 
     Returns:
-        str: Username.
+        str | RedirectResponse: Username if authenticated,
+        or RedirectResponse to /login for HTML requests.
 
     Raises:
         HTTPException: If the user is not authenticated.
     """
-    user = get_current_user_optional(request)
-    if not user:
+    user = await get_current_user_optional(request)
+    if user:
+        return user
+
+    accept = request.headers.get("accept", "")
+    if "text/html" in accept:
+        return RedirectResponse("/login")
+    else:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
-    return user
 
 
 def get_client_ip(request: Request) -> str:

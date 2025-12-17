@@ -1,36 +1,87 @@
 {% extends "base.html" %}
+
 {% block title %}Login{% endblock %}
 
 {% block content %}
 <div class="row justify-content-center mt-5">
     <div class="col-md-5">
-        <div class="card shadow">
+        <div class="card fade-in">
             <div class="card-header text-center">
-                <h4><i class="fas fa-user-lock me-2"></i>Login</h4>
+                <h4 class="mb-0"><i class="fas fa-user-lock me-2"></i>Login</h4>
             </div>
             <div class="card-body">
-
                 {% if error %}
-                <div class="alert alert-danger text-center">{{ error }}</div>
+                <div class="alert alert-danger text-center">
+                    <i class="fas fa-exclamation-triangle me-2"></i>{{ error }}
+                </div>
                 {% endif %}
 
                 <form method="POST" action="/login">
                     <div class="mb-3">
                         <label class="form-label">Username</label>
-                        <input required name="username" class="form-control" placeholder="admin">
+                        <input required name="username" class="form-control" placeholder="admin"
+                               value="{{ username or '' }}">
                     </div>
 
                     <div class="mb-3">
                         <label class="form-label">Password</label>
-                        <input required type="password" name="password" class="form-control">
+                        <div class="input-group">
+                            <input required type="password" name="password" class="form-control"
+                                   placeholder="Enter your password">
+                            <button type="button" class="btn btn-outline-secondary" id="toggleLoginPassword">
+                                <i class="fas fa-eye"></i>
+                            </button>
+                        </div>
                     </div>
 
-                    <button class="btn btn-primary w-100">
-                        <i class="fas fa-sign-in-alt me-1"></i> Login
+                    <button class="btn btn-primary w-100 py-2">
+                        <i class="fas fa-sign-in-alt me-2"></i>Login
                     </button>
                 </form>
+            </div>
+            <div class="card-footer text-center">
+                <small class="text-muted">
+                    <i class="fas fa-shield-alt me-1"></i>Secure authentication required
+                </small>
             </div>
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const LoginManager = {
+    init() {
+        this.setupPasswordToggle();
+        this.autoFocusUsername();
+    },
+
+    setupPasswordToggle() {
+        const toggleBtn = document.getElementById('toggleLoginPassword');
+        const passwordInput = document.querySelector('input[name="password"]');
+
+        if (toggleBtn && passwordInput) {
+            toggleBtn.addEventListener('click', () => {
+                const isPassword = passwordInput.type === 'password';
+                passwordInput.type = isPassword ? 'text' : 'password';
+                toggleBtn.innerHTML = isPassword
+                    ? '<i class="fas fa-eye-slash"></i>'
+                    : '<i class="fas fa-eye"></i>';
+            });
+        }
+    },
+
+    autoFocusUsername() {
+        const usernameInput = document.querySelector('input[name="username"]');
+        if (usernameInput) {
+            usernameInput.focus();
+        }
+    }
+};
+
+document.addEventListener('DOMContentLoaded', () => {
+    LoginManager.init();
+});
+</script>
 {% endblock %}

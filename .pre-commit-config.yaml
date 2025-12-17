@@ -12,23 +12,22 @@ repos:
         language_version: python3.13
 
   - repo: https://github.com/charliermarsh/ruff-pre-commit
-    rev: v0.14.6
+    rev: v0.14.7
     hooks:
       - id: ruff
         args: ["--fix"]
 
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.18.2
+    rev: v1.19.0
     hooks:
       - id: mypy
-        args: [--strict, --ignore-missing-imports]
         language_version: python3.13
         additional_dependencies:
-          - mypy>=1.18.2
+          - mypy>=1.19.0
           - types-requests>=2.32.4.20250913
           - sqlalchemy[asyncio]==2.0.41
           - asyncpg==0.30.0
           - aiohttp==3.13
           - aiosqlite>=0.21.0
           - pydantic>=2.12.4
-        files: ^src/
+        files: ^(src|admin)/

@@ -2,6 +2,7 @@ import configparser
 import logging
 import pathlib
 from dataclasses import dataclass
+from typing import Any
 
 import aiohttp
 
@@ -74,7 +75,7 @@ class TokenManager:
             self.config.write(f)
         self.logger.info("Configuration saved")
 
-    async def validate_token(self, token: str) -> bool:
+    async def validate_token(self, token: str) -> dict[str, Any] | None:
         """
         Validate token with Twitch OAuth validation endpoint.
 
@@ -82,10 +83,11 @@ class TokenManager:
             token: Access token to validate
 
         Returns:
-            True if token is valid, False otherwise
+            dict with validation data (contains expires_in, client_id, scopes, etc)
+            or None if token is invalid
         """
         if not token:
-            return False
+            return None
 
         url = "https://id.twitch.tv/oauth2/validate"
         headers = {"Authorization": f"OAuth {token}"}
@@ -94,13 +96,12 @@ class TokenManager:
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, headers=headers) as response:
                     if response.status == 200:
-                        data = await response.json()
-                        self.logger.info(f"Token valid. Scopes: {data.get('scopes', [])}")
-                        return True
-                    return False
+                        data: dict[str, Any] = await response.json()
+                        return data
+                    return None
         except Exception as e:
             self.logger.error(f"Token validation error: {e}")
-            return False
+            return None
 
     async def refresh_access_token(self, token_type: str = "BOT_TOKEN") -> str:
         """
@@ -119,7 +120,6 @@ class TokenManager:
         if token_type not in self.tokens:
             raise KeyError(f"Token type '{token_type}' not found")
 
-        self.logger.info(f"Refreshing {token_type}...")
         token_data = self.tokens[token_type]
 
         if not token_data.refresh_token:
@@ -168,10 +168,28 @@ class TokenManager:
         if not token_data.access_token:
             return await self.refresh_access_token(token_type)
 
-        if await self.validate_token(token_data.access_token):
-            return token_data.access_token
+        info = await self.validate_token(token_data.access_token)
 
-        return await self.refresh_access_token(token_type)
+        if info is None:
+            return await self.refresh_access_token(token_type)
+
+        expires_in = info.get("expires_in", 1)
+        token_display = (
+            f"{token_data.access_token[:5]}...{token_data.access_token[-5:]}" if token_data.access_token else "empty"
+        )
+        self.logger.info(f"Access token <{token_display}> expires in {expires_in} seconds")
+
+        refresh_in = 7200
+        if self.config.has_section("SETTINGS"):
+            refresh_in = self.config.getint("SETTINGS", "refresh_token_delay_time", fallback=7200)
+
+        refresh_in += 10
+
+        if expires_in < int(refresh_in):
+            self.logger.warning(f"{token_type} expires in {expires_in}s → refreshing early")
+            return await self.refresh_access_token(token_type)
+
+        return token_data.access_token
 
     def has_streamer_token(self) -> bool:
         """Check if streamer token is configured."""
