@@ -1,5 +1,6 @@
 import logging
-from typing import TYPE_CHECKING
+import asyncio
+from typing import TYPE_CHECKING, Optional
 
 from twitchio.errors import Unauthorized
 from twitchio.ext import eventsub
@@ -12,94 +13,137 @@ logger = logging.getLogger(__name__)
 
 class EventSubManager:
     """
-    Manager for Twitch EventSub subscriptions.
+    Manager for Twitch EventSub WebSocket subscriptions.
 
-    Handles initialization and subscription to channel point redemptions
-    for a given Twitch bot instance.
+    Handles the lifecycle of EventSub subscriptions for channel point redemptions
+    and monitors the underlying WebSocket connection health.
     """
 
     def __init__(self, bot: "TwitchBot") -> None:
         """
-        Initialize EventSub manager.
+        Initialize the EventSub manager.
 
         Args:
-            bot: TwitchBot instance.
+            bot: The parent TwitchBot instance. Used for API calls and token management.
         """
-        self.bot = bot
-        self.client: eventsub.EventSubWSClient | None = None
-        self.broadcaster_id: str | None = None
-        self.subscribed = False
+        self.bot: "TwitchBot" = bot
+        self.client: Optional[eventsub.EventSubWSClient] = None
+        self.broadcaster_id: Optional[str] = None
+        self.subscribed: bool = False
+        self._reconnect_lock: asyncio.Lock = asyncio.Lock()
 
     async def setup(self) -> None:
         """
-        Set up EventSub subscription for channel point redemptions.
+        Perform initial setup for EventSub.
 
-        If the streamer is not an Affiliate or Partner, subscription
-        will be skipped with a warning.
+        Fetches the broadcaster ID and attempts to create the initial subscription.
+        This method should be called once when the bot starts.
         """
         if not self.bot.token_manager.has_streamer_token():
-            logger.info("No STREAMER token → EventSub disabled")
+            logger.info("No streamer token available; EventSub is disabled.")
             return
 
         try:
-            channel_list = self.bot.config.get("channels") or []
+            channel_list: list[str] = self.bot.config.get("channels") or []
             if not channel_list:
-                logger.warning("Channel list is empty in config. EventSub setup skipped.")
+                logger.warning("No channels configured; EventSub setup skipped.")
                 return
 
-            users = await self.bot.fetch_users(names=[channel_list[0]])
+            streamer_name: str = channel_list[0]
+            users = await self.bot.fetch_users(names=[streamer_name])
             if not users:
-                logger.error(f"Streamer not found: {channel_list[0]}")
+                logger.error("Streamer not found: %s", streamer_name)
                 return
+
             self.broadcaster_id = users[0].id
+            await self._subscribe_once()
 
-            await self._start_client()
-
-        except Exception as e:
-            logger.error(f"EventSub setup failed: {e}", exc_info=True)
-
-    async def _start_client(self) -> None:
-        """Create the EventSub WebSocket client and subscribe to channel point redemptions."""
-        if not self.client:
-            self.client = eventsub.EventSubWSClient(self.bot)
-
-        token = await self.bot.token_manager.get_streamer_token()
-        if not token:
-            logger.warning("Cannot get streamer token → EventSub disabled")
-            return
-
-        try:
-            if not self.subscribed and self.broadcaster_id:
-                await self.client.subscribe_channel_points_redeemed(self.broadcaster_id, token)
-                self.subscribed = True
-                logger.info("EventSub WS client created and subscribed successfully")
-        except Unauthorized:
-            logger.warning("Streamer is not Affiliate/Partner — channel points EventSub disabled")
-        except Exception as e:
-            logger.warning(f"Failed to subscribe to channel points: {e}")
+        except Exception as exc:
+            logger.error("EventSub setup failed: %s", exc, exc_info=True)
 
     async def ensure_alive(self) -> None:
         """
-        Ensure the EventSub WebSocket client is active.
+        Check the health of the EventSub WebSocket connection and recover if needed.
 
-        If disconnected or uninitialized, attempts to recreate and resubscribe.
-
+        This method is intended to be called periodically. It checks if the internal
+        WebSocket sockets are present and connected. If not, it performs a full
+        cleanup and recreates the subscription.
         """
-        try:
-            if self.client is None or self.subscribed is False:
-                logger.warning("EventSub client not initialized → starting client")
-                await self._start_client()
-            else:
-                sockets = getattr(self.client, "_sockets", [])
-                if not any(getattr(sock, "is_connected", False) for sock in sockets):
-                    logger.warning("EventSub sockets disconnected → reconnecting")
-                    await self._start_client()
-        except Exception as e:
-            logger.warning(f"Failed to ensure EventSub WS alive: {e}")
+        if not self.subscribed or not self.client:
+            logger.warning("EventSub is not subscribed; attempting to subscribe.")
+            await self._subscribe_once()
+            return
+
+        sockets = getattr(self.client, "_sockets", [])
+        if not sockets:
+            logger.warning("No active EventSub sockets detected; recreating subscription.")
+            await self._cleanup()
+            await self._subscribe_once()
+            return
+
+        if not any(getattr(socket, "is_connected", False) for socket in sockets):
+            logger.warning("All EventSub sockets are disconnected; recreating subscription.")
+            await self._cleanup()
+            await self._subscribe_once()
 
     async def close(self) -> None:
-        """Reset and clear the EventSub WebSocket client."""
-        if self.client:
-            self.client = None
-            self.subscribed = False
-            logger.info("EventSub client cleared")
+        """
+        Shut down the EventSub manager and clean up all resources.
+
+        This should be called when the bot is shut down to ensure
+        proper cleanup of the internal EventSub client state.
+        """
+        await self._cleanup()
+        logger.info("EventSub manager closed.")
+
+    async def _subscribe_once(self) -> None:
+        """
+        Internal method to create a single EventSub subscription.
+
+        Uses a lock to prevent concurrent subscription attempts. If a valid
+        subscription already exists, this method returns early.
+        """
+        async with self._reconnect_lock:
+            if self.subscribed and self.client:
+                logger.debug("EventSub is already subscribed.")
+                return
+
+            token = await self.bot.token_manager.get_streamer_token()
+            if not token or not self.broadcaster_id:
+                logger.warning("Unable to subscribe to EventSub due to missing credentials.")
+                return
+
+            try:
+                self.client = eventsub.EventSubWSClient(self.bot)
+                await self.client.subscribe_channel_points_redeemed(
+                    self.broadcaster_id,
+                    token,
+                )
+                self.subscribed = True
+                logger.info("EventSub subscription successfully registered.")
+                # Note: The WebSocket connection is managed internally by TwitchIO
+                # and will be established automatically.
+
+            except Unauthorized:
+                logger.warning(
+                    "EventSub subscription failed: broadcaster is not an Affiliate or Partner, "
+                    "or the token is invalid."
+                )
+                await self._cleanup()
+
+            except Exception as exc:
+                logger.warning("Failed to register EventSub subscription: %s", exc)
+                await self._cleanup()
+
+    async def _cleanup(self) -> None:
+        """
+        Internal method to reset the manager's state.
+
+        Clears references to the current client and subscription status.
+        The brief sleep allows any pending asynchronous operations to settle
+        before a potential re-subscription.
+        """
+        self.client = None
+        self.subscribed = False
+        await asyncio.sleep(0.5)
+        logger.debug("EventSub internal state has been cleared.")
