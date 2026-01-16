@@ -8,6 +8,9 @@ from src.commands.games.base_game import BaseGame
 from src.commands.permissions import is_privileged
 from src.commands.text_inflect import format_duration
 
+VOTEBAN_REQUIRED_VOTES = 10
+VOTEBAN_WINDOW_SECONDS = 300
+VOTEBAN_TIMEOUT_SECONDS = 300
 
 class SimpleCommandsGame(BaseGame):
     """Handles simple chat commands like club, butt, and test barrel."""
@@ -201,6 +204,89 @@ class SimpleCommandsGame(BaseGame):
             execution_time = (time.time() - start_time) * 1000
             if execution_time > 500:
                 self.logger.info(f"Test barrel execution time: {execution_time:.2f}ms")
+
+    async def handle_voteban_command(self, ctx: Context) -> None:
+        """
+        Handle the !voteban command to vote for a user to be timed out.
+
+        Tracks votes, prevents self-voting, and applies the timeout
+        when the required number of votes is reached.
+
+        Args:
+            ctx: Command context object
+        """
+        try:
+            now = time.time()
+            parts = ctx.message.content.split()
+            if len(parts) < 2:
+                return
+
+            target_name = parts[1].lstrip("@").lower()
+            voter_name = ctx.author.name.lower()
+
+            if target_name == voter_name or not target_name:
+                return
+
+            state = self.command_handler.voteban_state
+
+            if state["target"] and now - state["start_time"] > VOTEBAN_WINDOW_SECONDS:
+                self._reset_voteban_state(state)
+
+            if state["target"] != target_name:
+                state["target"] = target_name
+                state["votes"] = set()
+                state["start_time"] = now
+
+            if voter_name in state["votes"]:
+                return
+
+            state["votes"].add(voter_name)
+            votes_count = len(state["votes"])
+
+            self.logger.info(
+                f"VoteBan vote: {voter_name} → {target_name} "
+                f"({votes_count}/{VOTEBAN_REQUIRED_VOTES})"
+            )
+
+            if votes_count < VOTEBAN_REQUIRED_VOTES:
+                return
+
+            target_id = await self.user_manager.get_user_id(target_name, None)
+            if not target_id:
+                self._reset_voteban_state(state)
+                return
+
+            status, _ = await self.api.timeout_user(
+                user_id=target_id,
+                channel_name=ctx.channel.name,
+                duration=VOTEBAN_TIMEOUT_SECONDS,
+                reason="voteban",
+            )
+
+            if status == 200:
+                await ctx.send(
+                    f"Jokerge Чат решил! @{target_name} изгнан на {VOTEBAN_TIMEOUT_SECONDS // 60} минут "
+                    f"({votes_count}/{VOTEBAN_REQUIRED_VOTES} голосов)"
+                )
+            else:
+                self.logger.warning(f"!voteban timeout failed: {status}")
+
+            self._reset_voteban_state(state)
+
+        except Exception as e:
+            self.logger.error(f"VoteBan error: {e}", exc_info=True)
+
+    @staticmethod
+    def _reset_voteban_state(state: dict) -> None:
+        """
+        Reset the voteban state to start a new vote.
+
+        Args:
+            state: The voteban state dictionary to reset
+        """
+        state["target"] = None
+        state["votes"].clear()
+        state["start_time"] = 0
 
     async def handle_command(self, ctx: Context) -> None:
         """Not used for simple commands."""

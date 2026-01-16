@@ -149,6 +149,12 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
         if self.active:
             await self.command_handler.handle_leaders(ctx)
 
+    @commands.command(name="voteban")
+    async def voteban(self, ctx: commands.Context) -> None:
+        """Handle the voteban command."""
+        if self.active:
+            await self.command_handler.handle_voteban(ctx)
+
     @commands.command(name="ботзаткнись")
     async def bot_sleep(self, ctx: commands.Context) -> None:
         """Deactivate the bot (admin only)."""
