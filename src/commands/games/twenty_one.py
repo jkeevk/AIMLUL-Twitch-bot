@@ -399,6 +399,28 @@ class TwentyOneGame(BaseGame):
             self.logger.error(f"Error in 'leaders' command: {e}")
             await ctx.send("Произошла ошибка при получении рейтинга")
 
+    async def has_tickets(self, twitch_id: str) -> bool:
+        """
+        Check if a player has at least one ticket.
+
+        Args:
+            twitch_id: Twitch ID of the player
+
+        Returns:
+            True if player has 1 or more tickets, False otherwise
+        """
+        tickets = await self.db.remove_tickets(twitch_id, 0)
+        return tickets > 0
+
+    async def consume_ticket(self, twitch_id: str) -> None:
+        """
+        Consume one ticket from the player. Does nothing if player has 0 tickets.
+
+        Args:
+            twitch_id: Twitch ID of the player
+        """
+        await self.db.remove_tickets(twitch_id, 1)
+
     async def close(self) -> None:
         """Clean up resources when shutting down."""
         if self.timer_task and not self.timer_task.done():

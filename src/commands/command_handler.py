@@ -44,6 +44,8 @@ class CommandHandler:
             "votes": set(),
             "start_time": 0.0,
         }
+        self.twenty_one_global_cooldown: float = 45.0
+        self.twenty_one_last_called: float = 0.0
 
     @staticmethod
     def get_current_time() -> float:
