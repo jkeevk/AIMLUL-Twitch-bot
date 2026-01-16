@@ -327,6 +327,9 @@ class TwentyOneGame(BaseGame):
             wins, losses = await self.db.get_stats(user_id)
             total = wins + losses
 
+            wins, losses = await self.db.get_stats(user_id)
+            tickets = await self.db.remove_tickets(user_id, 0)
+
             if total == 0:
                 await ctx.send(f"@{ctx.author.name}, у вас еще нет сыгранных игр. Сыграйте первую игру! GAMBA")
                 return
@@ -342,6 +345,7 @@ class TwentyOneGame(BaseGame):
                 f"@{ctx.author.name}, ваш ранг: {rank} "
                 f"(🏆 {wins} {wins_word} | 💀 {losses} {losses_word})\n"
                 f"📊 Процент побед: {win_rate:.1f}%"
+                f"📜 Билетов: {tickets}"
             )
 
             if next_rank_wins > 0:
