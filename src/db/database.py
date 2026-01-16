@@ -174,3 +174,67 @@ class Database:
         except SQLAlchemyError as e:
             logger.error(f"Get player rank error: {e}")
             return None
+
+    async def add_tickets(self, twitch_id: str, username: str, amount: int) -> int:
+        """
+        Add tickets to a player, creating a record if needed.
+
+        Args:
+            twitch_id: Twitch ID of the player
+            username: Username of the player
+            amount: Number of tickets to add
+
+        Returns:
+            Total tickets after addition
+        """
+        try:
+            async with self.session_scope() as session:
+                result = await session.execute(select(PlayerStats).where(PlayerStats.twitch_id == twitch_id))
+                player = result.scalars().first()
+
+                if not player:
+                    player = PlayerStats(
+                        twitch_id=twitch_id,
+                        username=username,
+                        tickets=amount
+                    )
+                    session.add(player)
+                else:
+                    player.tickets += amount
+
+                await session.flush()
+                return player.tickets
+
+        except SQLAlchemyError as e:
+            logger.error(f"Add tickets error: {e}", exc_info=True)
+            return 0
+
+    async def remove_tickets(self, twitch_id: str, amount: int) -> int:
+        """
+        Remove tickets from a player. Tickets will not go below zero.
+
+        Args:
+            twitch_id: Twitch ID of the player
+            amount: Number of tickets to remove
+
+        Returns:
+            Total tickets after removal (0 if player not found or error)
+        """
+        try:
+            async with self.session_scope() as session:
+                result = await session.execute(
+                    select(PlayerStats).where(PlayerStats.twitch_id == twitch_id)
+                )
+                player = result.scalars().first()
+
+                if not player:
+                    return 0
+
+                player.tickets = max(player.tickets - amount, 0)
+
+                await session.flush()
+                return player.tickets
+
+        except SQLAlchemyError as e:
+            logger.error(f"Remove tickets error: {e}", exc_info=True)
+            return 0
