@@ -57,7 +57,7 @@ class BeerChallengeGame(BaseGame):
                     tickets_awarded = 5
 
                 await self.db.add_tickets(target_id, user_name, tickets_awarded)
-                await channel.send(f"{msg} (+{'📜' * tickets_awarded})")
+                await channel.send(f"{msg} +{'📜' * tickets_awarded}")
 
                 return
 
