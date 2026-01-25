@@ -39,16 +39,26 @@ class BeerChallengeGame(BaseGame):
             success = roll <= success_chance
 
             if success:
+                target_id = await self.user_manager.get_user_id(user_name)
+                if not target_id:
+                    return
+
                 if amount <= 5:
                     msg = f"@{user_name}, разминочная Beerge"
+                    tickets_awarded = 1
                 elif amount <= 10:
                     msg = f"@{user_name} выпил пивка, освежился и пошел домой PoPivu"
+                    tickets_awarded = 2
                 elif amount <= 15:
                     msg = f"@{user_name}, куда в тебя столько влезло GIGATON"
+                    tickets_awarded = 3
                 else:
                     msg = f"@{user_name} - не человек, зверь нахуй NixyiaSobi"
+                    tickets_awarded = 5
 
-                await channel.send(msg)
+                await self.db.add_tickets(target_id, user_name, tickets_awarded)
+                await channel.send(f"{msg} +{'📜' * tickets_awarded}")
+
                 return
 
             fail_msgs = [

@@ -327,6 +327,9 @@ class TwentyOneGame(BaseGame):
             wins, losses = await self.db.get_stats(user_id)
             total = wins + losses
 
+            wins, losses = await self.db.get_stats(user_id)
+            tickets = await self.db.remove_tickets(user_id, 0)
+
             if total == 0:
                 await ctx.send(f"@{ctx.author.name}, у вас еще нет сыгранных игр. Сыграйте первую игру! GAMBA")
                 return
@@ -342,6 +345,7 @@ class TwentyOneGame(BaseGame):
                 f"@{ctx.author.name}, ваш ранг: {rank} "
                 f"(🏆 {wins} {wins_word} | 💀 {losses} {losses_word})\n"
                 f"📊 Процент побед: {win_rate:.1f}%"
+                f"📜 Билетов: {tickets}"
             )
 
             if next_rank_wins > 0:
@@ -394,6 +398,28 @@ class TwentyOneGame(BaseGame):
         except Exception as e:
             self.logger.error(f"Error in 'leaders' command: {e}")
             await ctx.send("Произошла ошибка при получении рейтинга")
+
+    async def has_tickets(self, twitch_id: str) -> bool:
+        """
+        Check if a player has at least one ticket.
+
+        Args:
+            twitch_id: Twitch ID of the player
+
+        Returns:
+            True if player has 1 or more tickets, False otherwise
+        """
+        tickets = await self.db.remove_tickets(twitch_id, 0)
+        return tickets > 0
+
+    async def consume_ticket(self, twitch_id: str) -> None:
+        """
+        Consume one ticket from the player. Does nothing if player has 0 tickets.
+
+        Args:
+            twitch_id: Twitch ID of the player
+        """
+        await self.db.remove_tickets(twitch_id, 1)
 
     async def close(self) -> None:
         """Clean up resources when shutting down."""

@@ -2,6 +2,7 @@ import logging
 import os
 from contextlib import suppress
 from typing import Any
+import time
 
 from twitchio import Message
 from twitchio.ext import commands
@@ -148,6 +149,34 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
         """Handle the leaders command to show top users."""
         if self.active:
             await self.command_handler.handle_leaders(ctx)
+
+    @commands.command(name="voteban")
+    async def voteban(self, ctx: commands.Context) -> None:
+        """Handle the voteban command."""
+        if self.active:
+            await self.command_handler.handle_voteban(ctx)
+
+    @commands.command(name="очко")
+    async def twenty_one(self, ctx: commands.Context) -> None:
+        """Handle the twenty_one command for users with free tickets."""
+        if not self.active:
+            return
+
+        now = time.time()
+        if now - self.command_handler.twenty_one_last_called < self.command_handler.twenty_one_global_cooldown:
+            return
+
+        self.command_handler.twenty_one_last_called = now
+
+        twitch_id = str(ctx.author.id)
+        username = str(ctx.author.name)
+
+        if not await self.command_handler.twenty_one_game.has_tickets(twitch_id):
+            await ctx.send(f'{username}, у тебя нет билетов для игры! Пройди "Испытание пивом" agabeer')
+            return
+
+        await self.command_handler.handle_twenty_one(ctx)
+        await self.command_handler.twenty_one_game.consume_ticket(twitch_id)
 
     @commands.command(name="ботзаткнись")
     async def bot_sleep(self, ctx: commands.Context) -> None:

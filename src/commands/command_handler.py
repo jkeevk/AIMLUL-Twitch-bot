@@ -39,6 +39,13 @@ class CommandHandler:
         self.simple_commands_game = SimpleCommandsGame(self)
         self.beer_barrel_game = BeerBarrelGame(self)
         self.beer_challenge_game = BeerChallengeGame(self)
+        self.voteban_state = {
+            "target": None,
+            "votes": set(),
+            "start_time": 0.0,
+        }
+        self.twenty_one_global_cooldown: float = 45.0
+        self.twenty_one_last_called: float = 0.0
 
     @staticmethod
     def get_current_time() -> float:
@@ -93,6 +100,10 @@ class CommandHandler:
     async def handle_leaders(self, ctx: Any) -> None:
         """Handle leaderboard display command."""
         await self.twenty_one_game.handle_leaders_command(ctx)
+
+    async def handle_voteban(self, ctx: Any) -> None:
+        """Handle voteban command."""
+        await self.simple_commands_game.handle_voteban_command(ctx)
 
     async def close(self) -> None:
         """Clean up resources on shutdown."""
