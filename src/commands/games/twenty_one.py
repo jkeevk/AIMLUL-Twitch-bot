@@ -409,7 +409,7 @@ class TwentyOneGame(BaseGame):
         Returns:
             True if player has 1 or more tickets, False otherwise
         """
-        tickets = await self.db.remove_tickets(twitch_id, 0)
+        tickets: int = await self.db.remove_tickets(twitch_id, 0)
         return tickets > 0
 
     async def consume_ticket(self, twitch_id: str) -> None:

@@ -1,6 +1,6 @@
-import logging
 import asyncio
-from typing import TYPE_CHECKING, Optional
+import logging
+from typing import TYPE_CHECKING
 
 from twitchio.errors import Unauthorized
 from twitchio.ext import eventsub
@@ -26,9 +26,9 @@ class EventSubManager:
         Args:
             bot: The parent TwitchBot instance. Used for API calls and token management.
         """
-        self.bot: "TwitchBot" = bot
-        self.client: Optional[eventsub.EventSubWSClient] = None
-        self.broadcaster_id: Optional[str] = None
+        self.bot: TwitchBot = bot
+        self.client: eventsub.EventSubWSClient | None = None
+        self.broadcaster_id: str | None = None
         self.subscribed: bool = False
         self._reconnect_lock: asyncio.Lock = asyncio.Lock()
 

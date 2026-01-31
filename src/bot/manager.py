@@ -329,6 +329,8 @@ class BotManager:
             True if there is at least one active EventSub socket, otherwise False.
         """
         try:
+            if not self.bot:
+                return False
             eventsub = self.bot.eventsub
 
             if not hasattr(eventsub, "client") or not eventsub.client:

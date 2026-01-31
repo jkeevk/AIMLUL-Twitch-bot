@@ -22,8 +22,9 @@ class BeerBarrelGame(BaseGame):
     @staticmethod
     async def _send_batched_message(channel: Any, prefix: str, names: list[str] | set[str]) -> None:
         """
-        Sends a list of usernames to the channel in batches, ensuring that
-        no single message exceeds the maximum allowed length.
+        Sends a list of usernames to the channel in batches.
+
+        Ensures that no single message exceeds the maximum allowed length.
 
         Args:
             channel (Any): The channel object where messages will be sent.
@@ -55,8 +56,9 @@ class BeerBarrelGame(BaseGame):
 
     async def _update_kaban_status(self, channel: Any, challenge_success: bool, remaining_seconds: int) -> bool:
         """
-        Updates the Kaban Challenge status by checking the number of participants
-        and sending an intermediate status message to the channel.
+        Updates the Kaban Challenge status.
+
+        Checks the number of participants and sends an intermediate status message.
 
         Args:
             channel (Any): The channel object where messages will be sent.
@@ -80,8 +82,10 @@ class BeerBarrelGame(BaseGame):
 
     async def _run_kaban_challenge_and_determine_fate(self, channel: Any) -> bool:
         """
-        Executes the Kaban Challenge event, including countdown messages,
-        visual notifications, and the final determination of success or failure.
+        Executes the Kaban Challenge event.
+
+        Includes countdown messages, visual notifications, and the final
+        determination of success or failure.
 
         Args:
             channel (Any): The channel object where messages will be sent.
@@ -100,7 +104,9 @@ class BeerBarrelGame(BaseGame):
         await channel.send(f"catLicks ПРИГОТОВИЛИСЬ! ДО ВСКРЫТИЯ ПИВНОЙ КЕГИ {self.KABAN_TIME_LIMIT} СЕКУНД! catLicks")
         await asyncio.sleep(2)
         await channel.send(
-            f"DinkDonk Начинается 'Прибежать кабанчиком на пиво'! KabanRunZaPivom Активируйте награды за баллы канала, чтобы обезвредить кегу! Нужно {self.KABAN_TARGET_COUNT} героев!"
+            f"DinkDonk Начинается 'Прибежать кабанчиком на пиво'! "
+            f"KabanRunZaPivom Активируйте награды за баллы канала, чтобы "
+            f"обезвредить кегу! Нужно {self.KABAN_TARGET_COUNT} героев!"
         )
 
         await asyncio.sleep(18)
@@ -148,8 +154,9 @@ class BeerBarrelGame(BaseGame):
 
     async def handle_beer_barrel_command(self, user_name: str, channel_name: str) -> None:
         """
-        Initiates the Beer Barrel event, selects users for punishment,
-        executes timeouts, and announces results.
+        Initiates the Beer Barrel event.
+
+        Selects users for punishment, executes timeouts, and announces results.
 
         Args:
             user_name (str): The user who triggered the command.
@@ -166,8 +173,7 @@ class BeerBarrelGame(BaseGame):
             if self.cache_manager.should_update_cache():
                 chatters = await self.api.get_chatters(channel_name)
                 normalized = [
-                    {"id": str(c["user_id"]), "name": c["user_name"], "display_name": c["user_name"]}
-                    for c in chatters
+                    {"id": str(c["user_id"]), "name": c["user_name"], "display_name": c["user_name"]} for c in chatters
                 ]
                 self.cache_manager._cached_chatters = self.cache_manager.filter_chatters(normalized)
                 self.cache_manager._last_cache_update = time.time()
@@ -179,11 +185,13 @@ class BeerBarrelGame(BaseGame):
                 if isinstance(c, dict):
                     valid_chatters.append(c)
                 else:
-                    valid_chatters.append({
-                        "id": str(getattr(c, "id", "") or getattr(c, "_id", "")),
-                        "name": getattr(c, "name", ""),
-                        "display_name": getattr(c, "display_name", "")
-                    })
+                    valid_chatters.append(
+                        {
+                            "id": str(getattr(c, "id", "") or getattr(c, "_id", "")),
+                            "name": getattr(c, "name", ""),
+                            "display_name": getattr(c, "display_name", ""),
+                        }
+                    )
 
             random.shuffle(valid_chatters)
             self.logger.info(f"Available chatters for selection: {len(valid_chatters)}")
@@ -294,8 +302,9 @@ class BeerBarrelGame(BaseGame):
 
     async def handle_trash_command(self, user_name: str, channel_name: str) -> None:
         """
-        Activates the 'Hide in a trash bin' protection for a user,
-        preventing them from being targeted during the Beer Barrel event.
+        Activates the 'Hide in a trash bin' protection for a user.
+
+        Prevents them from being targeted during the Beer Barrel event.
 
         Args:
             user_name (str): The user activating the protection.

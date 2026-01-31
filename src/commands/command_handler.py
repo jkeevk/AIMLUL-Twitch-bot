@@ -39,7 +39,7 @@ class CommandHandler:
         self.simple_commands_game = SimpleCommandsGame(self)
         self.beer_barrel_game = BeerBarrelGame(self)
         self.beer_challenge_game = BeerChallengeGame(self)
-        self.voteban_state = {
+        self.voteban_state: dict[str, Any] = {
             "target": None,
             "votes": set(),
             "start_time": 0.0,

@@ -1,6 +1,7 @@
 import asyncio
 import random
 import time
+from typing import Any
 
 from twitchio.ext.commands import Context
 
@@ -11,6 +12,7 @@ from src.commands.text_inflect import format_duration
 VOTEBAN_REQUIRED_VOTES = 10
 VOTEBAN_WINDOW_SECONDS = 300
 VOTEBAN_TIMEOUT_SECONDS = 300
+
 
 class SimpleCommandsGame(BaseGame):
     """Handles simple chat commands like club, butt, and test barrel."""
@@ -229,7 +231,7 @@ class SimpleCommandsGame(BaseGame):
 
             state = self.command_handler.voteban_state
 
-            if state["target"] and now - state["start_time"] > VOTEBAN_WINDOW_SECONDS:
+            if state.get("target") and now - state.get("start_time", 0) > VOTEBAN_WINDOW_SECONDS:
                 self._reset_voteban_state(state)
 
             if state["target"] != target_name:
@@ -243,10 +245,7 @@ class SimpleCommandsGame(BaseGame):
             state["votes"].add(voter_name)
             votes_count = len(state["votes"])
 
-            self.logger.info(
-                f"VoteBan vote: {voter_name} → {target_name} "
-                f"({votes_count}/{VOTEBAN_REQUIRED_VOTES})"
-            )
+            self.logger.info(f"VoteBan vote: {voter_name} → {target_name} " f"({votes_count}/{VOTEBAN_REQUIRED_VOTES})")
 
             if votes_count < VOTEBAN_REQUIRED_VOTES:
                 return
@@ -277,7 +276,7 @@ class SimpleCommandsGame(BaseGame):
             self.logger.error(f"VoteBan error: {e}", exc_info=True)
 
     @staticmethod
-    def _reset_voteban_state(state: dict) -> None:
+    def _reset_voteban_state(state: dict[str, Any]) -> None:
         """
         Reset the voteban state to start a new vote.
 

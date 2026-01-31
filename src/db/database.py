@@ -2,7 +2,7 @@ import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -148,33 +148,6 @@ class Database:
             logger.error(f"Get top players error: {e}")
             return []
 
-    async def get_player_rank(self, twitch_id: str) -> int | None:
-        """
-        Get player's rank position based on wins.
-
-        Args:
-            twitch_id: Player's Twitch ID
-
-        Returns:
-            Player's rank position or None if not found
-        """
-        try:
-            async with self.session_scope() as session:
-                stmt = (
-                    select(func.dense_rank().over(order_by=desc(PlayerStats.wins)).label("position"))
-                    .where(PlayerStats.twitch_id == twitch_id)
-                    .where(PlayerStats.wins.is_not(None))
-                    .limit(1)
-                )
-                result = await session.execute(stmt)
-                rank = result.scalar()
-
-                return rank if rank else None
-
-        except SQLAlchemyError as e:
-            logger.error(f"Get player rank error: {e}")
-            return None
-
     async def add_tickets(self, twitch_id: str, username: str, amount: int) -> int:
         """
         Add tickets to a player, creating a record if needed.
@@ -193,11 +166,7 @@ class Database:
                 player = result.scalars().first()
 
                 if not player:
-                    player = PlayerStats(
-                        twitch_id=twitch_id,
-                        username=username,
-                        tickets=amount
-                    )
+                    player = PlayerStats(twitch_id=twitch_id, username=username, tickets=amount)
                     session.add(player)
                 else:
                     player.tickets += amount
@@ -222,9 +191,7 @@ class Database:
         """
         try:
             async with self.session_scope() as session:
-                result = await session.execute(
-                    select(PlayerStats).where(PlayerStats.twitch_id == twitch_id)
-                )
+                result = await session.execute(select(PlayerStats).where(PlayerStats.twitch_id == twitch_id))
                 player = result.scalars().first()
 
                 if not player:
