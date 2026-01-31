@@ -6,7 +6,7 @@ logger = logging.getLogger(__name__)
 
 async def create_fake_context(bot: Any, username: str, channel_name: str, user_id: str) -> Any:
     """
-    Create a fake Context object simulating a Chatter for EventSub rewards.
+    Create a fake Context object simulating the Chatter for EventSub rewards.
 
     Args:
         bot: TwitchBot instance.

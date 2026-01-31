@@ -198,10 +198,12 @@ class Database:
                 if not player:
                     return 0
 
-                player.tickets = max(player.tickets - amount, 0)
+                current_tickets = player.tickets
+                new_tickets = max(current_tickets - amount, 0)
+                player.tickets = new_tickets
 
                 await session.flush()
-                return player.tickets
+                return new_tickets
 
         except SQLAlchemyError as e:
             logger.error(f"Remove tickets error: {e}", exc_info=True)

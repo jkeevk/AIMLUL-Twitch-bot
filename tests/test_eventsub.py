@@ -333,7 +333,7 @@ class TestEventSubEventCallbacks:
         # Create a generic mock EventSub event (avoiding specific TwitchIO class)
         mock_eventsub_event = MagicMock()
 
-        # Setup the event data structure to match what TwitchIO provides
+        # Set up the event data structure to match what TwitchIO provides
         mock_eventsub_event.data = MagicMock()
         mock_eventsub_event.data.broadcaster = MagicMock()
         mock_eventsub_event.data.broadcaster.name = "testchannel"
@@ -435,7 +435,7 @@ async def test_multiple_reward_types():
         # Call handler
         await handler(mock_event, mock_bot)
 
-        # Verify correct method was called
+        # Verify the correct method was called
         mock_handler = getattr(mock_bot.command_handler, handler_method)
         mock_handler.assert_awaited_once()
 
@@ -459,7 +459,7 @@ async def test_eventsub_reconnection_logic():
         await manager.ensure_alive()
         mock_subscribe.assert_awaited_once()
 
-    # Test: ensure_alive does not subscribe when already subscribed and has client with sockets
+    # Test: ensure_alive does not subscribe when already subscribed and has a client with sockets
     manager.subscribed = True
     manager.client = MagicMock()
     manager.client._sockets = [MagicMock(is_connected=True)]
@@ -549,7 +549,7 @@ async def test_event_handler_with_bot_inactive():
     # Call the handler
     await mock_bot.event_eventsub_notification_channel_reward_redeem(mock_event)
 
-    # Verify command was NOT called because bot is inactive
+    # Verify command was NOT called because the bot is inactive
     mock_bot.command_handler.handle_beer_challenge.assert_not_called()
 
 

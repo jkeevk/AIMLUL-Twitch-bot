@@ -1,7 +1,9 @@
 import time
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from twitchio import Message
 
 from tests.conftest import DummyAuthor, DummyMessage
 
@@ -11,7 +13,7 @@ async def test_handle_applecat_privileged_user(collectors_game):
     """Ensure privileged users do not get timed out when using applecat command."""
     author = DummyAuthor("user2", "PrivilegedUser2", privileged=True)
     author.is_mod = True
-    message = DummyMessage(author)
+    message = cast(Message, DummyMessage(author))
 
     await collectors_game.handle_applecat(message)
 
@@ -22,7 +24,7 @@ async def test_handle_applecat_privileged_user(collectors_game):
 async def test_handle_gnome_user_on_cooldown(collectors_game):
     """Test that a user on cooldown does not trigger timeout."""
     author = DummyAuthor("user3", "NormalUser")
-    message = DummyMessage(author)
+    message = cast(Message, DummyMessage(author))
     collectors_game.cache_manager.can_user_participate.return_value = False
 
     await collectors_game.handle_gnome(message)
@@ -32,9 +34,9 @@ async def test_handle_gnome_user_on_cooldown(collectors_game):
 
 @pytest.mark.asyncio
 async def test_handle_gnome_successful_participation(collectors_game):
-    """Verify successful participation of a user in the gnome collector."""
+    """Verify the successful participation of a user in the gnome collector."""
     author = DummyAuthor("user123", "TestUser")
-    message = DummyMessage(author)
+    message = cast(Message, DummyMessage(author))
 
     gnome = collectors_game.collectors["gnome"]
     assert gnome.participants == []
@@ -50,7 +52,7 @@ async def test_handle_gnome_collector_full_and_timeout(collectors_game):
     """
     Test that the gnome collector triggers timeout when full.
 
-    and resets participants.
+    Reset participants.
     """
     collectors_game.api.timeout_user = AsyncMock(return_value=(200, {}))
     collectors_game.cache_manager.can_user_participate.return_value = True
@@ -66,7 +68,8 @@ async def test_handle_gnome_collector_full_and_timeout(collectors_game):
 
     # Add new participant to trigger timeout
     author = DummyAuthor("userX", "UserX")
-    message = DummyMessage(author)
+    message = MagicMock(spec=Message)
+    message.author = author
     message.channel = mock_channel
 
     await collectors_game.handle_gnome(message)
@@ -80,7 +83,7 @@ async def test_handle_gnome_collector_full_and_timeout(collectors_game):
 async def test_handle_applecat_collector_full_and_timeout(collectors_game):
     """Test that applecat collector triggers timeout and resets participants when full."""
     author = DummyAuthor("user5", "User5")
-    message = DummyMessage(author)
+    message = cast(Message, DummyMessage(author))
     collectors_game.cache_manager.can_user_participate.return_value = True
 
     applecat = collectors_game.collectors["applecatpanik"]
@@ -100,7 +103,7 @@ async def test_handle_applecat_collector_full_and_timeout(collectors_game):
 async def test_handle_gnome_api_error(collectors_game):
     """Ensure collector resets even if the API returns an error."""
     author = DummyAuthor("user6", "User6")
-    message = DummyMessage(author)
+    message = cast(Message, DummyMessage(author))
     collectors_game.cache_manager.can_user_participate.return_value = True
 
     collectors_game.api.timeout_user = AsyncMock(return_value=(401, "Unauthorized"))
@@ -118,7 +121,7 @@ async def test_handle_gnome_api_error(collectors_game):
 async def test_collector_auto_reset(collectors_game):
     """Test automatic reset of collector after inactivity."""
     author = DummyAuthor("user7", "User7")
-    message = DummyMessage(author)
+    message = cast(Message, DummyMessage(author))
     collectors_game.cache_manager.can_user_participate.return_value = True
     collectors_game.api.timeout_user = AsyncMock(return_value=(200, {}))
 
@@ -162,7 +165,7 @@ async def test_collector_configurations(collectors_game):
 async def test_handle_gnome_exception_handling(collectors_game):
     """Ensure that exceptions in gnome command handling do not break execution."""
     author = DummyAuthor("user8", "User8")
-    message = DummyMessage(author)
+    message = cast(Message, DummyMessage(author))
     collectors_game.cache_manager.can_user_participate.side_effect = Exception("Test error")
 
     await collectors_game.handle_gnome(message)
@@ -172,7 +175,7 @@ async def test_handle_gnome_exception_handling(collectors_game):
 async def test_handle_applecat_exception_handling(collectors_game):
     """Ensure that exceptions in applecat command handling do not break execution."""
     author = DummyAuthor("user9", "User9")
-    message = DummyMessage(author)
+    message = cast(Message, DummyMessage(author))
     collectors_game.cache_manager.can_user_participate.side_effect = Exception("Test error")
 
     await collectors_game.handle_applecat(message)
@@ -180,12 +183,12 @@ async def test_handle_applecat_exception_handling(collectors_game):
 
 def contains_user(participants, user_id, user_name=None):
     """
-    Check if a user is in the participants list.
+    Check if a user is in the participant list.
 
     Args:
         participants (list[tuple]): List of tuples (user_id, user_name)
         user_id (str): User ID to check
-        user_name (str, optional): User name to check
+        user_name (str, optional): Username to check
 
     Returns:
         bool: True if user exists in participants, False otherwise

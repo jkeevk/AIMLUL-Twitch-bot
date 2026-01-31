@@ -263,7 +263,7 @@ class TwentyOneGame(BaseGame):
         score2: int,
     ) -> None:
         """
-        Handle the result of a game: update DB, send message, timeout loser.
+        Handle the result of a game: update DB, send a message, timeout loser.
 
         Args:
             channel: The channel object to send messages.
@@ -407,14 +407,14 @@ class TwentyOneGame(BaseGame):
             twitch_id: Twitch ID of the player
 
         Returns:
-            True if player has 1 or more tickets, False otherwise
+            True if a player has 1 or more tickets, False otherwise
         """
         tickets: int = await self.db.remove_tickets(twitch_id, 0)
         return tickets > 0
 
     async def consume_ticket(self, twitch_id: str) -> None:
         """
-        Consume one ticket from the player. Does nothing if player has 0 tickets.
+        Consume one ticket from the player. Does nothing if a player has 0 tickets.
 
         Args:
             twitch_id: Twitch ID of the player

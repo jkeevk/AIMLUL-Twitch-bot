@@ -18,7 +18,7 @@ class GameRank:
         Get player's rank based on win count.
 
         Args:
-            wins: Number of player wins
+            wins: Number of player's wins
 
         Returns:
             Rank name corresponding to the win count
@@ -67,14 +67,14 @@ class BaseCollector:
 
     def add(self, user_id: str, user_name: str) -> bool:
         """
-        Add participant to collection.
+        Add participant to the collection.
 
         Args:
             user_id: Twitch user ID
             user_name: Twitch display name
 
         Returns:
-            True if participant was added, False if already exists
+            True if participant was added, False if participant already exists
         """
         if any(uid == user_id for uid, _ in self.participants):
             return False
@@ -93,7 +93,7 @@ class BaseCollector:
         Check if collector should reset due to inactivity.
 
         Returns:
-            True if reset time threshold exceeded, False otherwise
+            True if the reset time threshold exceeded, False otherwise
         """
         return time.time() - self.last_added > self.config.reset_time
 
@@ -108,7 +108,7 @@ class BaseCollector:
 
     def get_random(self) -> tuple[str, str] | None:
         """
-        Get random participant from collection.
+        Get random participant from the collection.
 
         Returns:
             Tuple of (user_id, user_name) or None if no participants

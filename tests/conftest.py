@@ -16,7 +16,7 @@ from src.utils.token_manager import TokenManager
 
 @pytest.fixture
 def mock_token_manager() -> TokenManager:
-    """Mocked TokenManager with async refresh and dummy tokens."""
+    """Mocked TokenManager with async refresh and placeholder tokens."""
     tm = MagicMock(spec=TokenManager)
     tm.tokens = {"BOT_TOKEN": MagicMock(client_id="cid", client_secret="csecret")}
     tm.refresh_access_token = AsyncMock(return_value="new_token")
@@ -72,11 +72,10 @@ class DummyAuthor:
 class DummyMessage:
     """Represents a mock chat message."""
 
-    def __init__(self, author: DummyAuthor, channel_name: str = "testchannel", content: str = ""):
+    def __init__(self, author: DummyAuthor, channel_name: str = "testchannel"):
         self.author = author
-        self.channel = MagicMock()
+        self.channel = channel or MagicMock()
         self.channel.name = channel_name
-        self.content = ""
 
 
 @dataclass
@@ -99,7 +98,7 @@ class DummyCtx:
         self.message = type("Message", (), {"content": message_content})()
 
     async def send(self, msg: str):
-        """Store a message in the sent messages list."""
+        """Store a message in the "sent" messages list."""
         self.sent.append(msg)
 
 
@@ -130,10 +129,10 @@ def mock_bot():
     # Add config attribute that some tests expect
     bot.config = {"admins": []}
 
-    # Create real CommandHandler with the mocked bot
+    # Create a real CommandHandler with the mocked bot
     command_handler = CommandHandler(bot)
 
-    # Mock the game instances inside command handler
+    # Mock the game instances inside a command handler
     command_handler.beer_challenge_game = AsyncMock()
     command_handler.beer_challenge_game.handle_beer_challenge_command = AsyncMock()
     command_handler.twenty_one_game = AsyncMock()

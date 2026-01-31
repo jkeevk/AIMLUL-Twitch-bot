@@ -25,7 +25,7 @@ async def test_reward_handlers_call_command(mock_bot):
 
 @pytest.mark.asyncio
 async def test_beer_challenge_non_numeric_input():
-    """Test that Beer Challenge reward with non-numeric input returns error message."""
+    """Test that Beer Challenge reward with a non-numeric input returns error message."""
     reward_name = "испытание пивом"
     handler = reward_handlers.get(reward_name)
     assert handler is not None, f"Handler for reward {reward_name} not found"
@@ -42,7 +42,7 @@ async def test_beer_challenge_non_numeric_input():
     mock_command_handler = AsyncMock()
     mock_command_handler.handle_beer_challenge = AsyncMock()
 
-    # Setup the chain: bot.command_handler.handle_beer_challenge
+    # Set up the chain: bot.command_handler.handle_beer_challenge
     mock_bot.command_handler = mock_command_handler
 
     # Execute the handler
@@ -66,7 +66,7 @@ async def test_beer_challenge_non_numeric_input():
 
 @pytest.mark.asyncio
 async def test_beer_challenge_empty_input():
-    """Test that Beer Challenge reward with empty input returns error message."""
+    """Test that Beer Challenge reward with an empty input returns error message."""
     reward_name = "испытание пивом"
     handler = reward_handlers.get(reward_name)
     assert handler is not None, f"Handler for reward {reward_name} not found"
@@ -82,7 +82,7 @@ async def test_beer_challenge_empty_input():
     mock_command_handler = AsyncMock()
     mock_command_handler.handle_beer_challenge = AsyncMock()
 
-    # Setup the chain: bot.command_handler.handle_beer_challenge
+    # Set up the chain: bot.command_handler.handle_beer_challenge
     mock_bot.command_handler = mock_command_handler
 
     # Execute the handler
@@ -106,7 +106,7 @@ async def test_beer_challenge_empty_input():
 
 @pytest.mark.asyncio
 async def test_beer_challenge_whitespace_input():
-    """Test that Beer Challenge reward with only whitespace input returns error message."""
+    """Test that Beer Challenge reward with only a whitespace input returns error message."""
     reward_name = "испытание пивом"
     handler = reward_handlers.get(reward_name)
     assert handler is not None, f"Handler for reward {reward_name} not found"
@@ -122,7 +122,7 @@ async def test_beer_challenge_whitespace_input():
     mock_command_handler = AsyncMock()
     mock_command_handler.handle_beer_challenge = AsyncMock()
 
-    # Setup the chain: bot.command_handler.handle_beer_challenge
+    # Set up the chain: bot.command_handler.handle_beer_challenge
     mock_bot.command_handler = mock_command_handler
 
     # Execute the handler
@@ -163,7 +163,7 @@ async def test_beer_challenge_mixed_input():
     mock_command_handler = AsyncMock()
     mock_command_handler.handle_beer_challenge = AsyncMock()
 
-    # Setup the chain: bot.command_handler.handle_beer_challenge
+    # Set up the chain: bot.command_handler.handle_beer_challenge
     mock_bot.command_handler = mock_command_handler
 
     # Execute the handler
@@ -195,14 +195,14 @@ async def test_beer_challenge_game_non_numeric_logic():
     mock_channel = AsyncMock()
     mock_channel.send = AsyncMock()
 
-    # Setup bot to return mock channel
+    # Setup bot to return a mock channel
     mock_bot.get_channel = MagicMock(return_value=mock_channel)
     mock_bot.join_channels = AsyncMock()
     mock_bot.active = True
     mock_bot.api = AsyncMock()
     mock_bot.db = AsyncMock()
 
-    # Create real CommandHandler with the mocked bot
+    # Create a real CommandHandler with the mocked bot
     command_handler = CommandHandler(mock_bot)
 
     # Now we need to test the actual method logic
@@ -215,7 +215,7 @@ async def test_beer_challenge_game_non_numeric_logic():
     # Call the actual method
     await command_handler.beer_challenge_game.handle_beer_challenge_command(user_name, non_numeric_input, channel_name)
 
-    # Verify that send was called with the error message
+    # Verify that "send" was called with the error message
     mock_channel.send.assert_awaited_once()
 
     # Get the actual message sent

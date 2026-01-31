@@ -30,7 +30,7 @@ class TokenManager:
         Initialize TokenManager with configuration.
 
         Args:
-            config_path: Path to configuration file containing token data
+            config_path: Path to the configuration file containing token data
         """
         self.logger: logging.Logger = logging.getLogger(self.__class__.__name__)
         self.config_path: str = config_path
@@ -60,7 +60,7 @@ class TokenManager:
         )
 
     def _save_config(self) -> None:
-        """Save current token state to configuration file."""
+        """Save the current token state to the configuration file."""
         for section, token_data in self.tokens.items():
             if not self.config.has_section(section):
                 self.config.add_section(section)
@@ -83,7 +83,7 @@ class TokenManager:
             token: Access token to validate
 
         Returns:
-            dict with validation data (contains expires_in, client_id, scopes, etc)
+            dict with validation data (contains expires_in, client_id, scopes, etc.)
             or None if token is invalid
         """
         if not token:

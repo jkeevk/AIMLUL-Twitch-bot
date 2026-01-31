@@ -82,7 +82,7 @@ def run_oauth_server(handler_class: type[BaseHTTPRequestHandler]) -> str | None:
 
 def save_tokens(access_token: str, refresh_token: str, client_id: str, client_secret: str) -> None:
     """
-    Save OAuth tokens and client credentials to configuration file.
+    Save OAuth tokens and client credentials to the configuration file.
 
     Args:
         access_token: OAuth access token
@@ -176,7 +176,7 @@ def get_oauth_token() -> dict[str, Any] | None:
 
 
 def _create_default_config() -> None:
-    """Create default configuration file with required sections."""
+    """Create the default configuration file with required sections."""
     config = configparser.ConfigParser()
     config["STREAMER_TOKEN"] = {
         "token": "",
@@ -197,7 +197,7 @@ def _create_default_config() -> None:
 
 
 def main() -> None:
-    """Main entry point for token generator script."""
+    """Main entry point for the token generator script."""
     logger.info("Twitch Token Generator started")
 
     if not pathlib.Path(CONFIG_PATH).exists():

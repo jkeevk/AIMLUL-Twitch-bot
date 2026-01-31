@@ -1,37 +1,29 @@
+from collections.abc import AsyncGenerator
+
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
 
 from src.db.database import Base, Database, PlayerStats
 
 
 @pytest.fixture
-async def db() -> Database:
+async def db() -> AsyncGenerator[Database]:
     """
     Fixture to provide an in-memory SQLite database for testing.
 
     Returns:
         Database: An instance of the Database class connected to in-memory SQLite.
     """
-    # Create in-memory SQLite async engine
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False, future=True)
+    # Create an in-memory SQLite database
+    database = Database("sqlite+aiosqlite:///:memory:")
 
     # Create all tables
-    async with engine.begin() as conn:
+    async with database.engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-
-    # Configure sessionmaker for async sessions
-    async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-    # Instantiate Database with proper session
-    database = Database(dsn="sqlite+aiosqlite:///:memory:")
-    database.engine = engine
-    database.async_session = async_session
 
     yield database
 
     # Dispose engine after tests
-    await engine.dispose()
+    await database.engine.dispose()
 
 
 @pytest.mark.asyncio

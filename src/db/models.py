@@ -69,7 +69,7 @@ class ScheduledOffline(Base):
     """
     Represents a scheduled offline record for the bot.
 
-    Each record stores the last date the bot was automatically disabled
+    Each record store the last date the bot was automatically disabled
     according to the schedule. This helps prevent sending repeated offline
     messages on restarts.
 

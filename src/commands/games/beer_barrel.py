@@ -58,7 +58,7 @@ class BeerBarrelGame(BaseGame):
         """
         Updates the Kaban Challenge status.
 
-        Checks the number of participants and sends an intermediate status message.
+        Checks the number of participants and send an intermediate status message.
 
         Args:
             channel (Any): The channel object where messages will be sent.
@@ -91,7 +91,7 @@ class BeerBarrelGame(BaseGame):
             channel (Any): The channel object where messages will be sent.
 
         Returns:
-            bool: True if the standard punishment should be applied (challenge failed),
+            bool: True if the standard punishment should be applied (the challenge failed),
                   False if the challenge succeeded and punishment is avoided.
         """
         channel_name = channel.name

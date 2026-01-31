@@ -1,4 +1,5 @@
 import logging
+from json import JSONDecodeError
 from typing import Any, cast
 
 import aiohttp
@@ -83,7 +84,7 @@ class TwitchAPI:
         Args:
             method: HTTP method ('get', 'post', etc.)
             url: Full URL
-            kwargs: aiohttp request parameters (headers, params, json, etc.)
+            kwargs: aiohttp request parameters (headers, params, JSON, etc.)
 
         Returns:
             Tuple of (status_code, json_data)
@@ -94,10 +95,10 @@ class TwitchAPI:
         async def do_request() -> tuple[int, dict[str, Any]]:
             async with session.request(method, url, **kwargs) as resp:
                 try:
-                    data: dict[str, Any] = await resp.json()
-                except Exception:
-                    data = {}
-                return resp.status, data
+                    resp_data: dict[str, Any] = await resp.json()
+                except JSONDecodeError:
+                    resp_data = {}
+                return resp.status, resp_data
 
         status, data = await do_request()
 
@@ -112,7 +113,7 @@ class TwitchAPI:
 
     async def get_chatters(self, channel_name: str, broadcaster_id: str | None = None) -> list[dict[str, str]]:
         """
-        Get list of chatters using Twitch Helix API.
+        Get the list of chatters using Twitch Helix API.
 
         Args:
             channel_name: The name of the channel to get chatters for.
@@ -143,7 +144,7 @@ class TwitchAPI:
 
     async def timeout_user(self, user_id: str, channel_name: str, duration: int, reason: str) -> tuple[int, Any]:
         """
-        Issue timeout to a user in specified channel.
+        Issue timeout to a user in the specified channel.
 
         Args:
             user_id: Target user ID

@@ -19,7 +19,7 @@ async def test_first_two_play_instantly(twenty_one_game):
             self.name = name
 
     def make_ctx(user_id: int, user_name: str):
-        """Create a dummy context with a send method and author."""
+        """Create a mock context with a send method and author."""
         return type(
             "Ctx",
             (),
@@ -108,7 +108,7 @@ async def test_repeated_player_cannot_join_twice(twenty_one_game):
 
 @pytest.mark.asyncio
 async def test_game_resets_after_timer(twenty_one_game):
-    """Test that the game queue resets correctly after timer expires."""
+    """Test that the game queue resets correctly after the timer expires."""
     twenty_one_game.timer_seconds = 1
 
     class DummyChatter:

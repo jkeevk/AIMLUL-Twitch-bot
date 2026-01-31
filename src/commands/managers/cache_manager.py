@@ -58,7 +58,7 @@ class UserIDCache:
         self._cache[username] = (user_id, time.time())
 
     def _cleanup(self) -> None:
-        """Remove oldest entries when cache exceeds maximum size."""
+        """Remove the oldest entries when the cache exceeds maximum size."""
         if len(self._cache) >= self._max_size:
             sorted_items = sorted(self._cache.items(), key=lambda x: x[1][1])
             remove_count = max(1, len(sorted_items) // 10)
@@ -70,7 +70,7 @@ class CacheManager:
     """
     Central cache manager for command handlers.
 
-    Manages various caches including user IDs, chatters list,
+    Manages various caches including user IDs, chatter list,
     and cooldowns for commands and users.
     """
 
@@ -94,7 +94,7 @@ class CacheManager:
             chatter: User object to validate
 
         Returns:
-            True if user can be targeted, False otherwise
+            True if the user can be targeted, False otherwise
         """
         if isinstance(chatter, dict) and "name" in chatter:
             name = chatter["name"].lower()
@@ -138,7 +138,7 @@ class CacheManager:
 
     def get_cached_chatters(self) -> list[Any]:
         """
-        Get cached chatters list.
+        Get the cached chatters list.
 
         Returns:
             List of cached chatter objects

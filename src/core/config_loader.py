@@ -6,9 +6,9 @@ from typing import Any
 
 def load_settings(config_path: str | None = None) -> dict[str, Any]:
     """
-    Load bot configuration settings from INI file.
+    Load bot configuration settings from the INI file.
 
-    Creates default configuration file if it doesn't exist and returns
+    Creates a default configuration file if it doesn't exist and returns
     parsed settings with appropriate data types.
 
     Args:

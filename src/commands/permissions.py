@@ -15,7 +15,7 @@ def is_privileged(chatter: Chatter) -> bool:
         chatter: Twitch chatter object to check
 
     Returns:
-        True if user has privileged status, False otherwise
+        True if the user has privileged status, False otherwise
     """
     return chatter.is_mod or chatter.is_broadcaster or chatter.name in PRIVILEGED_USERS
 
@@ -29,6 +29,6 @@ def is_admin(bot: Any, username: str) -> bool:
         username: Twitch username to check.
 
     Returns:
-        True if user is an admin, False otherwise.
+        True if the user is an admin, False otherwise.
     """
     return username.lower() in bot.config.get("admins", [])

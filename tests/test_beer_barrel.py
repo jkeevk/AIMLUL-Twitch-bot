@@ -33,7 +33,7 @@ class TestBeerBarrelGame:
 
     @pytest.mark.asyncio
     async def test_send_batched_message_small_list(self, beer_barrel_game):
-        """Test sending batched message with small list of names."""
+        """Test sending batched message with a small list of names."""
         mock_channel = AsyncMock()
         mock_channel.send = AsyncMock()
 
@@ -49,7 +49,7 @@ class TestBeerBarrelGame:
 
     @pytest.mark.asyncio
     async def test_send_batched_message_large_list(self, beer_barrel_game):
-        """Test sending batched message with large list that exceeds max length."""
+        """Test sending batched message with a large list that exceeds max length."""
         mock_channel = AsyncMock()
         mock_channel.send = AsyncMock()
 
@@ -64,7 +64,7 @@ class TestBeerBarrelGame:
 
     @pytest.mark.asyncio
     async def test_send_batched_message_empty_list(self, beer_barrel_game):
-        """Test sending batched message with empty list."""
+        """Test sending batched message with an empty list."""
         mock_channel = AsyncMock()
         mock_channel.send = AsyncMock()
 
@@ -75,7 +75,7 @@ class TestBeerBarrelGame:
 
     @pytest.mark.asyncio
     async def test_update_kaban_status_success(self, beer_barrel_game):
-        """Test kaban status update when target count is reached."""
+        """Test kaban status update when a target count is reached."""
         mock_channel = AsyncMock()
         mock_channel.send = AsyncMock()
 
@@ -173,7 +173,7 @@ class TestBeerBarrelGame:
             result = await beer_barrel_game._run_kaban_challenge_and_determine_fate(mock_channel)
 
         assert result is True  # Should return True for punishment
-        # Should send failure message
+        # Should send a failure message
         send_calls = [call[0][0] for call in mock_channel.send.call_args_list]
         assert any("Не хватило кабанчиков" in str(call) for call in send_calls)
 
@@ -199,7 +199,7 @@ class TestBeerBarrelGame:
 
     @pytest.mark.asyncio
     async def test_handle_trash_command_already_protected(self, beer_barrel_game):
-        """Test trash command when user is already protected."""
+        """Test trash command when a user is already protected."""
         beer_barrel_game._is_running = True
         beer_barrel_game.active_players.add("TestUser")
 
@@ -241,7 +241,7 @@ class TestBeerBarrelGame:
 
     @pytest.mark.asyncio
     async def test_handle_kaban_command_full_team(self, beer_barrel_game):
-        """Test kaban command when team is already full."""
+        """Test kaban command when a team is already full."""
         beer_barrel_game._is_running = True
         # Fill the team
         for i in range(beer_barrel_game.KABAN_TARGET_COUNT):
@@ -291,7 +291,7 @@ class TestBeerBarrelGame:
             with patch("asyncio.sleep", new_callable=AsyncMock):
                 await beer_barrel_game.handle_beer_barrel_command("TriggerUser", "testchannel")
 
-        # Should not call timeout_user since challenge was neutralized
+        # Should not call timeout_user since a challenge was neutralized
         beer_barrel_game.api.timeout_user.assert_not_called()
 
     @pytest.mark.asyncio
@@ -321,7 +321,7 @@ class TestBeerBarrelGame:
 
         # Should call timeout_user for selected users
         assert beer_barrel_game.api.timeout_user.call_count > 0
-        # Should send batched message with punished users
+        # Should send a batched message with punished users
         mock_batched.assert_called()
 
     @pytest.mark.asyncio
@@ -352,8 +352,8 @@ class TestBeerBarrelGame:
                 with patch.object(beer_barrel_game, "_send_batched_message", new_callable=AsyncMock):
                     # Add protected player AFTER the command starts (simulating during execution)
                     # We'll patch the _run_kaban_challenge_and_determine_fate to add protection
-                    async def mock_challenge(channel):
-                        # Simulate user activating protection during challenge
+                    async def mock_challenge(_channel):
+                        # Simulate user activating protection during a challenge
                         beer_barrel_game.active_players.add("protecteduser")
                         return True
 
@@ -361,7 +361,7 @@ class TestBeerBarrelGame:
 
                     await beer_barrel_game.handle_beer_barrel_command("TriggerUser", "testchannel")
 
-        # Should only timeout unprotected user
+        # Should only time out unprotected user
         assert beer_barrel_game.api.timeout_user.call_count == 1
 
         # Check that timeout_user was called for UnprotectedUser, not ProtectedUser
@@ -377,7 +377,8 @@ class TestBeerBarrelGame:
 
         try:
             await beer_barrel_game.handle_beer_barrel_command("TriggerUser", "testchannel")
-        except Exception:
+        except Exception as e:
+            beer_barrel_game.logger.error("Caught exception during test: %s", e)
             pytest.fail("Exception should be caught and logged, not propagated")
 
         # Should log error
