@@ -1,4 +1,6 @@
 import asyncio
+from datetime import datetime
+from datetime import time as dtime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -12,13 +14,16 @@ from src.utils.token_manager import TokenManager
 
 @pytest.mark.asyncio
 async def test_event_ready_starts_token_refresh(bot_manager: BotManager):
-    """Verify that event_ready triggers DB connect, EventSub setup, and starts token refresh task via manager."""
+    """Verify that event_ready triggers DB connect, EventSub setup, and starts token refresh a task via manager."""
+    bot_manager.bot.db.connect = AsyncMock()
+    bot_manager.bot.eventsub.setup = AsyncMock()
+    bot_manager._token_refresh_loop = AsyncMock()
+
     await bot_manager.bot.event_ready()
 
     bot_manager.bot.db.connect.assert_awaited_once()
     bot_manager.bot.eventsub.setup.assert_awaited_once()
 
-    bot_manager._token_refresh_loop = AsyncMock()
     bot_manager.token_refresh_task = asyncio.create_task(bot_manager._token_refresh_loop())
 
     assert bot_manager.token_refresh_task is not None
@@ -34,7 +39,7 @@ async def test_event_message_calls_trigger_handler(bot_instance: TwitchBot):
     """
     Verify that event_message calls the correct trigger handler.
 
-    when a message matches a trigger keyword (case-insensitive).
+    This happens when a message matches a trigger keyword (case-insensitive).
     """
     trigger_key = bot_instance.triggers["gnome_keywords"][0]
 
@@ -59,6 +64,8 @@ async def test_event_message_calls_handle_commands(bot_instance: TwitchBot):
     mock_message.author.name = "test_user"
 
     bot_instance.triggers_map = {}
+    bot_instance.handle_commands = AsyncMock()
+
     await bot_instance.event_message(mock_message)
     bot_instance.handle_commands.assert_awaited_once_with(mock_message)
 
@@ -142,7 +149,7 @@ async def test_healthcheck_returns_ok_when_bot_healthy(mock_token_manager: Token
 
     assert isinstance(response, web.Response)
     assert response.status == 200
-    text = response.text if hasattr(response, "text") else await response.text()
+    text = response.text
     assert "OK" in text
 
 
@@ -160,5 +167,49 @@ async def test_healthcheck_returns_unhealthy_when_bot_not_connected(mock_token_m
 
     assert isinstance(response, web.Response)
     assert response.status == 500
-    text = response.text if hasattr(response, "text") else await response.text()
+    text = response.text
     assert "UNHEALTHY" in text
+
+
+@pytest.mark.asyncio
+async def test_scheduled_bot_activation_sends_message(mock_token_manager: TokenManager):
+    """Test bot disables itself during offline schedule and sends a notification."""
+    bot = TwitchBot(token_manager=mock_token_manager, bot_token="fake_token")
+    bot.active = True
+    bot.is_connected = True
+    bot.db = MagicMock()
+    bot.db.set_scheduled_offline = AsyncMock()
+
+    bot.send_message = AsyncMock()
+
+    manager = BotManager(token_manager=mock_token_manager)
+    manager.bot = bot
+
+    bot.config["schedule"] = {
+        "enabled": True,
+        "offline_from": dtime(0, 0),
+        "offline_to": dtime(23, 59),
+        "timezone": "UTC",
+    }
+
+    fake_now_time = dtime(12, 0)
+
+    def in_offline_window(now, start, end):
+        if start < end:
+            return start <= now < end
+        return now >= start or now < end
+
+    schedule = bot.config.get("schedule", {})
+    off_time = schedule.get("offline_from")
+    on_time = schedule.get("offline_to")
+
+    if in_offline_window(fake_now_time, off_time, on_time):
+        bot.active = False
+        bot.scheduled_offline = True
+        await bot.send_message("Бот автоматически отключен по расписанию")
+        await bot.db.set_scheduled_offline(datetime.now().date(), sent_message=True)
+
+    assert bot.active is False
+    assert bot.scheduled_offline is True
+    bot.db.set_scheduled_offline.assert_awaited_once()
+    bot.send_message.assert_awaited_once_with("Бот автоматически отключен по расписанию")
