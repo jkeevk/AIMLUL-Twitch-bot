@@ -1,8 +1,8 @@
 import logging
 import os
+import time
 from contextlib import suppress
 from typing import Any
-import time
 
 from twitchio import Message
 from twitchio.ext import commands
@@ -62,6 +62,8 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
         self.triggers = build_triggers(self)
         self.token_refresh_task = None
         self.is_connected: bool = False
+        self.scheduled_offline: bool = False
+        self.manual_override: bool = False
 
     async def event_token_expired(self) -> str | None:
         """
@@ -91,6 +93,7 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
                 self.db = None
 
         await self.eventsub.setup()
+        self.loop.create_task(self.scheduled_activity_controller())
 
     async def event_message(self, message: Message) -> None:
         """
@@ -100,6 +103,9 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
             message: The incoming message object
         """
         if message.echo:
+            return
+
+        if not self.active and not (message.author and is_admin(self, message.author.name)):
             return
 
         text = message.content.lower()
@@ -124,6 +130,8 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
         Args:
             event: The EventSub reward redemption event
         """
+        if not self.active:
+            return
         await handle_eventsub_reward(event, self)
 
     @commands.command(name="жопа")
@@ -184,6 +192,8 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
         if not is_admin(self, ctx.author.name):
             return
         self.active = False
+        self.manual_override = False
+        self.scheduled_offline = False
         await ctx.send("banka Алибидерчи! Бот выключен.")
 
     @commands.command(name="ботговори")
@@ -191,8 +201,103 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
         """Activate the bot (admin only)."""
         if not is_admin(self, ctx.author.name):
             return
+        self.manual_override = True
+        self.scheduled_offline = False
         self.active = True
         await ctx.send("deshovka Бот снова активен!")
+
+    async def scheduled_activity_controller(self) -> None:
+        """
+        Manage the bot's activity according to a schedule.
+
+        This coroutine runs continuously and checks whether the current time
+        falls within the configured offline window. It will automatically
+        deactivate the bot and send an offline message if necessary. It also
+        persists the last shutdown in the database to avoid sending repeated
+        messages on bot restarts.
+
+        The offline window can be overridden manually by an admin using commands.
+        """
+        import asyncio
+        from datetime import datetime
+        from datetime import time as dtime
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+        def in_offline_window(time_to_check: dtime, start: dtime, end: dtime) -> bool:
+            """
+            Check if the current time falls within the offline window.
+
+            Args:
+                time_to_check (dtime): The time to check.
+                start (dtime): The start time of the offline window.
+                end (dtime): The end time of the offline window.
+
+            Returns:
+                bool: True if time_to_check is within the window, False otherwise.
+            """
+            if start < end:
+                return start <= time_to_check < end
+            return time_to_check >= start or time_to_check < end
+
+        while True:
+            if not self.is_connected:
+                await asyncio.sleep(5)
+                continue
+
+            schedule = self.config.get("schedule", {})
+            if not schedule.get("enabled"):
+                await asyncio.sleep(60)
+                continue
+
+            off_time = schedule.get("offline_from")
+            on_time = schedule.get("offline_to")
+            timezone = schedule.get("timezone")
+
+            if not off_time or not on_time or not timezone:
+                await asyncio.sleep(60)
+                continue
+
+            try:
+                tz = ZoneInfo(timezone)
+            except ZoneInfoNotFoundError:
+                await asyncio.sleep(60)
+                continue
+
+            now_dt = datetime.now(tz)
+            now_time = now_dt.time()
+            today = now_dt.date()
+
+            record = await self.db.get_scheduled_offline(today) if self.db else None
+            message_already_sent = record.sent_message if record else False
+
+            if not self.manual_override and in_offline_window(now_time, off_time, on_time):
+                if not self.scheduled_offline:
+                    self.active = False
+                    self.scheduled_offline = True
+
+                if not message_already_sent:
+                    for channel in self.connected_channels:
+                        await channel.send(
+                            "Bedge отключаюсь на время киношного. "
+                            "Разбудить: !ботговори Заткнуть: !ботзаткнись (admin only)"
+                        )
+                    if self.db:
+                        await self.db.set_scheduled_offline(today, sent_message=True)
+
+            else:
+                if self.scheduled_offline or message_already_sent:
+                    self.scheduled_offline = False
+                    self.manual_override = False
+
+                    if not self.active:
+                        self.active = True
+                        for channel in self.connected_channels:
+                            await channel.send("peepoArrive работаем")
+
+                    if self.db:
+                        await self.db.set_scheduled_offline(today, sent_message=False)
+
+            await asyncio.sleep(60)
 
     async def close(self) -> None:
         """Clean up resources and close the bot gracefully."""
