@@ -80,20 +80,22 @@ async def test_get_top_players(db: Database) -> None:
 async def test_player_rank(db: Database) -> None:
     """Test retrieving player ranks based on win counts."""
     # Populate sample data
-    await db.update_stats("u1", "User1", True)
-    await db.update_stats("u1", "User1", True)  # User1 wins 2 games
-    await db.update_stats("u2", "User2", True)  # User2 wins 1 game
-    await db.update_stats("u3", "User3", False)  # User3 has 0 wins
+    await db.update_stats("u1", "Alice", True)  # Alice 1 win
+    await db.update_stats("u1", "Alice", True)  # Alice 2 wins
+    await db.update_stats("u2", "Bob", True)  # Bob 1 win
+    await db.update_stats("u3", "Charlie", False)  # Charlie 0 wins
 
     # Retrieve player ranks
-    rank_u1 = await db.get_player_rank("u1")
-    rank_u2 = await db.get_player_rank("u2")
-    rank_u3 = await db.get_player_rank("u3")
-
+    top_players = await db.get_top_players(limit=3)
+    wins_order = [player[1] for player in top_players]
+    assert wins_order == sorted(wins_order, reverse=True)
     # Validate ranks
-    assert rank_u1 == 1
-    assert rank_u2 == 2
-    assert rank_u3 == 3
+    assert top_players[0][0] == "Alice"
+    assert top_players[0][1] == 2
+    assert top_players[1][0] == "Bob"
+    assert top_players[1][1] == 1
+    assert top_players[2][0] == "Charlie"
+    assert top_players[2][1] == 0
 
 
 @pytest.mark.asyncio

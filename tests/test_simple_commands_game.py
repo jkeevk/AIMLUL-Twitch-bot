@@ -1,8 +1,13 @@
-from unittest.mock import patch
+import time
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from tests.conftest import DummyCtx
+from tests.conftest import DummyAuthor, DummyChannel, DummyCtx
+
+VOTEBAN_REQUIRED_VOTES = 10
+VOTEBAN_TIMEOUT_SECONDS = 600
+VOTEBAN_WINDOW_SECONDS = 300
 
 
 @pytest.mark.asyncio
@@ -142,3 +147,80 @@ async def test_handle_club_cooldown(simple_commands_game, ctx_privileged, mock_c
 
     await simple_commands_game.handle_club_command(ctx_privileged)
     assert len(ctx_privileged.sent) == 0
+
+
+@pytest.mark.asyncio
+async def test_handle_voteban_not_enough_votes(simple_commands_game, ctx_normal):
+    """Test that voteban does nothing if votes are below threshold."""
+    ctx_normal.message.content = "!voteban @target"
+    simple_commands_game.command_handler.voteban_state = {
+        "target": None,
+        "votes": set(),
+        "start_time": 0,
+    }
+
+    # First vote should not trigger a timeout
+    await simple_commands_game.handle_voteban_command(ctx_normal)
+    assert ctx_normal.sent == []
+
+
+@pytest.mark.asyncio
+async def test_handle_voteban_timeout_success(simple_commands_game):
+    """Test voteban command triggers timeout after reaching vote threshold."""
+    # Create author and channel
+    normal_author = DummyAuthor(10, "voter10")
+    channel = DummyChannel("test_channel")
+
+    # Create command context with voteban message
+    ctx = DummyCtx(author=normal_author, channel=channel, message_content="!voteban @target")
+
+    # Simulate existing 9 votes for the target
+    simple_commands_game.command_handler.voteban_state = {
+        "target": "target",
+        "votes": {f"voter{i}" for i in range(1, 10)},  # 9 votes
+        "start_time": time.time(),
+    }
+
+    # Patch user_manager and api
+    with (
+        patch.object(simple_commands_game.command_handler, "user_manager", create=True) as um_mock,
+        patch.object(simple_commands_game, "api", create=True) as api_mock,
+    ):
+
+        um_mock.get_user_id = AsyncMock(return_value="target-id")
+        api_mock.timeout_user = AsyncMock(return_value=(200, {}))
+
+        # Call the voteban command, 10th vote should trigger timeout
+        await simple_commands_game.handle_voteban_command(ctx)
+
+    # Assert that a timeout message was sent
+    assert any("изгнан" in msg for msg in ctx.sent)
+
+
+@pytest.mark.asyncio
+async def test_handle_voteban_self_vote(simple_commands_game, ctx_normal):
+    """Test that voteban ignores self-votes."""
+    ctx_normal.author.name = "target"
+    ctx_normal.message.content = "!voteban @target"
+    simple_commands_game.command_handler.voteban_state = {
+        "target": None,
+        "votes": set(),
+        "start_time": 0,
+    }
+
+    await simple_commands_game.handle_voteban_command(ctx_normal)
+    assert ctx_normal.sent == []
+
+
+@pytest.mark.asyncio
+async def test_handle_voteban_no_target(simple_commands_game, ctx_normal):
+    """Test that voteban does nothing if no target is provided."""
+    ctx_normal.message.content = "!voteban"
+    simple_commands_game.command_handler.voteban_state = {
+        "target": None,
+        "votes": set(),
+        "start_time": 0,
+    }
+
+    await simple_commands_game.handle_voteban_command(ctx_normal)
+    assert ctx_normal.sent == []

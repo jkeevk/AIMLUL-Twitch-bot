@@ -2,25 +2,16 @@ from dataclasses import dataclass
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from twitchio.ext.commands import Context
 
 from src.bot.manager import BotManager
 from src.bot.twitch_bot import TwitchBot
+from src.commands.command_handler import CommandHandler
 from src.commands.games.collectors_game import CollectorsGame
 from src.commands.games.simple_commands import SimpleCommandsGame
 from src.commands.games.twenty_one import TwentyOneGame
 from src.commands.triggers.text_triggers import build_triggers
 from src.utils.token_manager import TokenManager
-
-
-@dataclass
-class DummyAuthor:
-    """Represents a mock user/author for testing."""
-
-    def __init__(self, id_: str | int, name: str, privileged: bool = False):
-        self.id = id_
-        self.name = name
-        self.is_mod = privileged
-        self.is_broadcaster = privileged
 
 
 @pytest.fixture
@@ -67,13 +58,25 @@ def bot_manager(bot_instance: TwitchBot, mock_token_manager: TokenManager) -> Bo
 
 
 @dataclass
+class DummyAuthor:
+    """Represents a mock user/author for testing."""
+
+    def __init__(self, id_: str | int, name: str, privileged: bool = False):
+        self.id = id_
+        self.name = name
+        self.is_mod = privileged
+        self.is_broadcaster = privileged
+
+
+@dataclass
 class DummyMessage:
     """Represents a mock chat message."""
 
-    def __init__(self, author: DummyAuthor, channel_name: str = "testchannel"):
+    def __init__(self, author: DummyAuthor, channel_name: str = "testchannel", content: str = ""):
         self.author = author
         self.channel = MagicMock()
         self.channel.name = channel_name
+        self.content = ""
 
 
 @dataclass
@@ -89,23 +92,68 @@ class DummyChannel:
 class DummyCtx:
     """Represents a mock command context."""
 
-    def __init__(self, author: DummyAuthor, channel: DummyChannel):
+    def __init__(self, author: DummyAuthor, channel: "DummyChannel", message_content: str = ""):
         self.author = author
         self.channel = channel
         self.sent: list[str] = []
+        self.message = type("Message", (), {"content": message_content})()
 
     async def send(self, msg: str):
         """Store a message in the sent messages list."""
         self.sent.append(msg)
 
 
+@dataclass
+class DummyEvent:
+    """Dummy EventSub event for testing reward handlers."""
+
+    def __init__(self, reward_name, username, user_id, input_val=""):
+        self.data = MagicMock()
+        self.data.reward = MagicMock()
+        self.data.reward.title = reward_name
+        self.data.user = MagicMock()
+        self.data.user.name = username
+        self.data.user.id = user_id
+        self.data.broadcaster = MagicMock()
+        self.data.broadcaster.name = "TestBroadcaster"
+        self.data.input = input_val
+
+
 @pytest.fixture
-def mock_bot() -> MagicMock:
-    """Mock bot object with minimal configuration."""
-    bot = MagicMock()
-    bot.nick = "botnick"
-    bot.config = {"admins": [], "privileged": []}
+def mock_bot():
+    """Create a mocked TwitchBot instance for general testing."""
+    bot = MagicMock(spec=TwitchBot)
+    bot.active = True
+    bot.api = AsyncMock()
+    bot.db = AsyncMock()
+
+    # Add config attribute that some tests expect
+    bot.config = {"admins": []}
+
+    # Create real CommandHandler with the mocked bot
+    command_handler = CommandHandler(bot)
+
+    # Mock the game instances inside command handler
+    command_handler.beer_challenge_game = AsyncMock()
+    command_handler.beer_challenge_game.handle_beer_challenge_command = AsyncMock()
+    command_handler.twenty_one_game = AsyncMock()
+    command_handler.beer_barrel_game = AsyncMock()
+
+    bot.command_handler = command_handler
     return bot
+
+
+@pytest.fixture
+def mock_context():
+    """Create a mocked Context for testing commands."""
+    ctx = MagicMock(spec=Context)
+    ctx.author = MagicMock()
+    ctx.author.name = "TestUser"
+    ctx.author.id = "123"
+    ctx.channel = MagicMock()
+    ctx.channel.name = "testbroadcaster"
+    ctx.send = AsyncMock()
+    return ctx
 
 
 @pytest.fixture
