@@ -29,6 +29,7 @@ class BotManager:
 
     health_app: web.Application | None
     health_runner: web.AppRunner | None
+    scheduled_task: TaskType | None
 
     def __init__(self, token_manager: TokenManager) -> None:
         """
@@ -47,6 +48,7 @@ class BotManager:
         self._websocket_error_count = 0
         self.health_app = None
         self.health_runner = None
+        self.scheduled_task = None
 
     async def start_health_server(self, host: str = "127.0.0.1", port: int = 8081) -> None:
         """
@@ -101,6 +103,7 @@ class BotManager:
 
         self.refresh_task = asyncio.create_task(self._token_refresh_loop())
         self.watchdog_task = asyncio.create_task(self._watchdog_loop())
+        self.scheduled_task = asyncio.create_task(self._scheduled_activity_loop())
 
         while self._running:
             try:
@@ -175,7 +178,7 @@ class BotManager:
 
         tasks: list[TaskType] = []
 
-        for t in (self.refresh_task, self.watchdog_task, self.bot_task):
+        for t in (self.refresh_task, self.watchdog_task, self.bot_task, self.scheduled_task):
             if t and not t.done():
                 t.cancel()
                 tasks.append(t)
@@ -397,3 +400,96 @@ class BotManager:
         except Exception as e:
             logger.warning(f"Error checking websocket: {e}")
             return False
+
+    async def _scheduled_activity_loop(self) -> None:
+        """
+        Manage the bot's activity according to a schedule.
+
+        This coroutine runs continuously and checks whether the current time
+        falls within the configured offline window. It will automatically
+        deactivate the bot and send an offline message if necessary. It also
+        persists the last shutdown in the database to avoid sending repeated
+        messages on bot restarts.
+
+        The offline window can be overridden manually by an admin using commands.
+        """
+        from datetime import datetime
+        from datetime import time as dtime
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+        def in_offline_window(time_to_check: dtime, start: dtime, end: dtime) -> bool:
+            """
+            Check if the current time falls within the offline window.
+
+            Args:
+                time_to_check (dtime): The time to check.
+                start (dtime): The start time of the offline window.
+                end (dtime): The end time of the offline window.
+
+            Returns:
+                bool: True if time_to_check is within the window, False otherwise.
+            """
+            if start < end:
+                return start <= time_to_check < end
+            return time_to_check >= start or time_to_check < end
+
+        while self._running:
+            if not self.bot or not getattr(self.bot, "is_connected", False):
+                await asyncio.sleep(5)
+                continue
+
+            bot = self.bot
+            schedule = bot.config.get("schedule", {})
+            if not schedule.get("enabled"):
+                await asyncio.sleep(60)
+                continue
+
+            off_time = schedule.get("offline_from")
+            on_time = schedule.get("offline_to")
+            timezone = schedule.get("timezone")
+
+            if not off_time or not on_time or not timezone:
+                await asyncio.sleep(60)
+                continue
+
+            try:
+                tz = ZoneInfo(timezone)
+            except ZoneInfoNotFoundError:
+                await asyncio.sleep(60)
+                continue
+
+            now_dt = datetime.now(tz)
+            now_time = now_dt.time()
+            today = now_dt.date()
+
+            assert bot.db is not None
+            record = await bot.db.get_scheduled_offline(today)
+            message_already_sent = record.sent_message if record else False
+
+            if not getattr(bot, "manual_override", False) and in_offline_window(now_time, off_time, on_time):
+                if not getattr(bot, "scheduled_offline", False):
+                    bot.active = False
+                    bot.scheduled_offline = True
+
+                if not message_already_sent:
+                    for channel in getattr(bot, "connected_channels", []):
+                        await channel.send(
+                            "Bedge отключаюсь на время киношного. "
+                            "Разбудить: !ботговори Заткнуть: !ботзаткнись (admin only)"
+                        )
+                    await bot.db.set_scheduled_offline(today, sent_message=True)
+
+            else:
+                if getattr(bot, "scheduled_offline", False) or message_already_sent:
+                    bot.scheduled_offline = False
+                    bot.manual_override = False
+
+                    if not getattr(bot, "active", True):
+                        bot.active = True
+                        for channel in getattr(bot, "connected_channels", []):
+                            await channel.send("peepoArrive работаем")
+
+                    if getattr(bot, "db", None):
+                        await bot.db.set_scheduled_offline(today, sent_message=False)
+
+            await asyncio.sleep(60)
