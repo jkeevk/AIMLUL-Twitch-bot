@@ -64,7 +64,7 @@ class CallbackHandler(BaseHTTPRequestHandler):
         pass
 
 
-def run_oauth_server(handler_class: type[BaseHTTPRequestHandler]) -> str | None:
+def run_oauth_server(handler_class: Any = None) -> str | None:
     """
     Run HTTP server for OAuth callback and return authorization code.
 
@@ -74,17 +74,21 @@ def run_oauth_server(handler_class: type[BaseHTTPRequestHandler]) -> str | None:
     Returns:
         Authorization code if received, None otherwise.
     """
-    server = OAuthHTTPServer(("localhost", 3000), CallbackHandler)
+    if handler_class is None:
+        handler_class = CallbackHandler
+
+    server = OAuthHTTPServer(("localhost", 3000), handler_class)
     logger.info("Starting local HTTP server on http://localhost:3000 for OAuth callback")
     server.serve_forever()
     return server.auth_code
 
 
-def save_tokens(access_token: str, refresh_token: str, client_id: str, client_secret: str) -> None:
+def save_tokens(section: str, access_token: str, refresh_token: str, client_id: str, client_secret: str) -> None:
     """
     Save OAuth tokens and client credentials to the configuration file.
 
     Args:
+        section (str): Section name.
         access_token: OAuth access token
         refresh_token: OAuth refresh token
         client_id: Twitch application client ID
@@ -93,40 +97,40 @@ def save_tokens(access_token: str, refresh_token: str, client_id: str, client_se
     config = configparser.ConfigParser()
     config.read(CONFIG_PATH)
 
-    if not config.has_section("STREAMER_TOKEN"):
-        config.add_section("STREAMER_TOKEN")
+    if not config.has_section(section):
+        config.add_section(section)
 
-    config.set("STREAMER_TOKEN", "token", access_token)
-    config.set("STREAMER_TOKEN", "refresh_token", refresh_token)
-    config.set("STREAMER_TOKEN", "client_id", client_id)
-    config.set("STREAMER_TOKEN", "client_secret", client_secret)
+    config.set(section, "token", access_token)
+    config.set(section, "refresh_token", refresh_token)
+    config.set(section, "client_id", client_id)
+    config.set(section, "client_secret", client_secret)
 
     with pathlib.Path(CONFIG_PATH).open("w") as configfile:
         config.write(configfile)
 
-    logger.info(f"Streamer tokens saved to {CONFIG_PATH}")
+    logger.info(f"{section} tokens saved to {CONFIG_PATH}")
 
 
-def get_oauth_token() -> dict[str, Any] | None:
+def get_oauth_token(token_type: str = "STREAMER_TOKEN") -> dict[str, Any] | None:
     """
-    Perform OAuth token acquisition flow for Twitch streamer token.
+    Universal OAuth token generator.
 
-    Opens browser for authorization and runs temporary HTTP server
-    to capture the OAuth callback.
+    Args:
+        token_type: 'BOT_TOKEN' or 'STREAMER_TOKEN' (default: STREAMER_TOKEN)
 
     Returns:
-        Token data dictionary if successful, None otherwise.
+        Token data dict if successful, None otherwise
     """
     config = configparser.ConfigParser()
     config.read(CONFIG_PATH)
 
-    if not config.has_option("STREAMER_TOKEN", "client_id") or not config.has_option("STREAMER_TOKEN", "client_secret"):
-        logger.error("client_id and client_secret must be specified in settings.ini")
+    if not config.has_option(token_type, "client_id") or not config.has_option(token_type, "client_secret"):
+        logger.error(f"{token_type} section must have client_id and client_secret in settings.ini")
         return None
 
-    client_id = config.get("STREAMER_TOKEN", "client_id")
-    client_secret = config.get("STREAMER_TOKEN", "client_secret")
-    scope = config.get("STREAMER_TOKEN", "scope", fallback="")
+    client_id = config.get(token_type, "client_id")
+    client_secret = config.get(token_type, "client_secret")
+    scope = config.get(token_type, "scope", fallback="")
     redirect_uri = "http://localhost:3000"
 
     auth_url = (
@@ -138,7 +142,7 @@ def get_oauth_token() -> dict[str, Any] | None:
         "&force_verify=true"
     )
 
-    logger.info("Opening browser for Twitch OAuth authorization...")
+    logger.info(f"Opening browser for Twitch OAuth authorization ({token_type})...")
     webbrowser.open(auth_url)
 
     logger.info("Waiting for OAuth callback on http://localhost:3000...")
@@ -164,6 +168,7 @@ def get_oauth_token() -> dict[str, Any] | None:
         token_data: dict[str, Any] = response.json()
         logger.info("OAuth token acquired successfully")
         save_tokens(
+            token_type,
             access_token=token_data["access_token"],
             refresh_token=token_data["refresh_token"],
             client_id=client_id,
@@ -176,13 +181,21 @@ def get_oauth_token() -> dict[str, Any] | None:
 
 
 def _create_default_config() -> None:
-    """Create the default configuration file with required sections."""
     config = configparser.ConfigParser()
     config["STREAMER_TOKEN"] = {
         "token": "",
         "client_id": "",
         "client_secret": "",
         "refresh_token": "",
+        "scope": "channel:read:redemptions channel:manage:redemptions",
+    }
+    config["BOT_TOKEN"] = {
+        "token": "",
+        "client_id": "",
+        "client_secret": "",
+        "refresh_token": "",
+        "scope": "channel:read:redemptions chat:edit chat:read moderation:read \
+        moderator:manage:banned_users moderator:read:chatters moderator:read:followers",
     }
     config["INITIAL_CHANNELS"] = {"channels": ""}
     config["SETTINGS"] = {
@@ -203,14 +216,19 @@ def main() -> None:
     if not pathlib.Path(CONFIG_PATH).exists():
         logger.warning(f"Configuration file not found: {CONFIG_PATH}")
         _create_default_config()
-        logger.info("Please add client_id and client_secret from Twitch Developer Console and rerun the script")
+        logging.info("Please add client_id and client_secret from Twitch Developer Console and rerun the script")
         sys.exit(0)
 
-    token_data = get_oauth_token()
+    token_type = input("Which token do you want to generate? (BOT_TOKEN / STREAMER_TOKEN): ").strip().upper()
+    if token_type not in ("BOT_TOKEN", "STREAMER_TOKEN"):
+        logging.error("Invalid token type selected")
+        sys.exit(1)
+
+    token_data = get_oauth_token(token_type)
     if token_data:
-        logger.info("Setup complete! You can now run the bot with new tokens")
+        logging.info(f"{token_type} setup complete! You can now use the new tokens")
     else:
-        logger.error("Failed to acquire token. Check settings and try again")
+        logging.error("Failed to acquire token. Check settings and try again")
 
 
 if __name__ == "__main__":
