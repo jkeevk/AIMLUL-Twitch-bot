@@ -4,6 +4,7 @@
 [![TwitchIO](https://img.shields.io/badge/TwitchIO-2.1.0-purple?logo=twitch)](https://github.com/TwitchIO/TwitchIO)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-336791?logo=postgresql)](https://postgresql.org)
 [![Docker](https://img.shields.io/badge/Docker-24.0%2B-2496ED?logo=docker)](https://docker.com)
+[![Redis](https://img.shields.io/badge/Redis-7.2-DC382D?logo=redis)](https://redis.io)
 [![Black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE-MIT)
 
