@@ -1,7 +1,8 @@
-from typing import TypedDict
+from dataclasses import dataclass
 
 
-class ChatterData(TypedDict):
+@dataclass
+class ChatterData:
     id: str
     name: str
     display_name: str

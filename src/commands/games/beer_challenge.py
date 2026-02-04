@@ -3,7 +3,7 @@ import random
 from twitchio.ext.commands import Context
 
 from src.commands.games.base_game import BaseGame
-from src.commands.models.chatters import ChatterData
+from src.commands.permissions import is_privileged
 
 
 class BeerChallengeGame(BaseGame):
@@ -31,17 +31,15 @@ class BeerChallengeGame(BaseGame):
                 self.logger.error(f"Invalid input: {user_input}")
                 return
 
-            user_obj = ChatterData(id="", name=user_name, display_name=user_name)
             amount = max(1, min(int(cleaned), 20))
             success_chance = self.get_success_chance(amount)
             roll = random.randint(1, 100)
 
             success = roll <= success_chance
-
+            target_id = await self.cache_manager.get_user_id(user_name, channel_name, self.api)
+            if not target_id:
+                return
             if success:
-                target_id = await self.user_manager.get_user_id(user_name)
-                if not target_id:
-                    return
 
                 if amount <= 5:
                     msg = f"@{user_name}, разминочная Beerge"
@@ -70,15 +68,13 @@ class BeerChallengeGame(BaseGame):
             msg = random.choice(fail_msgs)
             await channel.send(msg)
 
-            if not self.cache_manager.filter_chatters([user_obj]):
-                self.logger.warning(f"Privileged user? {user_obj["name"]}")
+            if is_privileged(user_name):
+                self.logger.warning(f"Privileged user? {user_name}")
                 return
 
-            target_id = await self.user_manager.get_user_id(user_name)
-            if target_id:
-                await self.api.timeout_user(
-                    user_id=target_id, channel_name=channel_name, duration=60, reason="Испытание пивом — провал"
-                )
+            await self.api.timeout_user(
+                user_id=target_id, channel_name=channel_name, duration=60, reason="Испытание пивом"
+            )
 
         except Exception as e:
             self.logger.error(f"Error in Beer Challenge command: {e}")

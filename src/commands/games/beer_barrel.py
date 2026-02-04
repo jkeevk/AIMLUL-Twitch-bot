@@ -1,11 +1,12 @@
 import asyncio
 import random
-import time
 from typing import Any
 
 from twitchio.ext.commands import Context
 
 from src.commands.games.base_game import BaseGame
+from src.commands.models.chatters import ChatterData
+from src.commands.permissions import is_privileged
 
 MAX_MESSAGE_LENGTH = 255
 
@@ -16,7 +17,7 @@ class BeerBarrelGame(BaseGame):
     _is_running: bool = False
     active_players: set[str] = set()
     kaban_players: set[str] = set()
-    KABAN_TARGET_COUNT: int = 12
+    KABAN_TARGET_COUNT: int = 20
     KABAN_TIME_LIMIT: int = 60
 
     @staticmethod
@@ -170,40 +171,18 @@ class BeerBarrelGame(BaseGame):
         self.kaban_players.clear()
 
         try:
-            if self.cache_manager.should_update_cache():
-                chatters = await self.api.get_chatters(channel_name)
-                normalized = [
-                    {"id": str(c["user_id"]), "name": c["user_name"], "display_name": c["user_name"]} for c in chatters
-                ]
-                self.cache_manager._cached_chatters = self.cache_manager.filter_chatters(normalized)
-                self.cache_manager._last_cache_update = time.time()
+            chatters = await self.cache_manager.get_or_update_chatters(channel_name, self.api)
+            random.shuffle(chatters)
+            self.logger.info(f"Available chatters for selection: {len(chatters)}")
 
-            raw_chatters = self.cache_manager.get_cached_chatters()
-
-            valid_chatters: list[dict[str, str]] = []
-            for c in raw_chatters:
-                if isinstance(c, dict):
-                    valid_chatters.append(c)
-                else:
-                    valid_chatters.append(
-                        {
-                            "id": str(getattr(c, "id", "") or getattr(c, "_id", "")),
-                            "name": getattr(c, "name", ""),
-                            "display_name": getattr(c, "display_name", ""),
-                        }
-                    )
-
-            random.shuffle(valid_chatters)
-            self.logger.info(f"Available chatters for selection: {len(valid_chatters)}")
-
-            if not valid_chatters:
+            if not chatters:
                 self.logger.warning("No suitable users for barrel command.")
                 return
 
-            selected_count = min(50, len(valid_chatters))
+            selected_count = min(50, len(chatters))
 
-            all_initial_targets: list[dict[str, str]] = random.sample(valid_chatters, selected_count)
-            initial_target_names_lower: set[str] = {t["name"].lower() for t in all_initial_targets}
+            all_initial_targets: list[ChatterData] = random.sample(chatters, selected_count)
+            initial_target_names_lower = {t.name.lower() for t in all_initial_targets}
             self.logger.info(f"Initial targets selected: {len(all_initial_targets)}")
 
             channel = self.bot.get_channel(channel_name)
@@ -218,9 +197,9 @@ class BeerBarrelGame(BaseGame):
                 self.logger.info("Beer barrel completed (Neutralized by Kaban Challenge).")
                 return
 
-            async def process_timeout(target: dict[str, str]) -> str | None:
-                target_id = target.get("id")
-                target_name = target.get("name")
+            async def process_timeout(target: ChatterData) -> str | None:
+                target_id = target.id
+                target_name = target.name
                 try:
                     if not target_id or not target_name:
                         return None
@@ -246,8 +225,10 @@ class BeerBarrelGame(BaseGame):
             await asyncio.sleep(1)
 
             active_players_lower: set[str] = {name.lower() for name in self.active_players}
-            targets_to_punish: list[dict[str, str]] = [
-                t for t in all_initial_targets if t["name"].lower() not in active_players_lower
+            targets_to_punish: list[ChatterData] = [
+                t
+                for t in all_initial_targets
+                if t.name.lower() not in active_players_lower and not is_privileged(t.name)
             ]
 
             punished_users: list[str] = []

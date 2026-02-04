@@ -21,9 +21,8 @@ class BaseGame(ABC):
         self.bot = command_handler.bot
         self.api = command_handler.api
         self.db = command_handler.db
-        self.cache_manager = command_handler.cache_manager
-        self.user_manager = command_handler.user_manager
         self.logger = logging.getLogger(__name__)
+        self.cache_manager = self.bot.cache_manager
 
     @abstractmethod
     async def handle_command(self, ctx: "Context") -> None:
@@ -38,7 +37,7 @@ class BaseGame(ABC):
         """
         raise NotImplementedError("Subclasses must implement handle_command method")
 
-    def check_cooldown(self, command_name: str) -> bool:
+    async def check_cooldown(self, command_name: str) -> bool:
         """
         Check if command is ready to execute based on cooldown.
 
@@ -48,24 +47,17 @@ class BaseGame(ABC):
         Returns:
             True if command can be executed, False if still on cooldown
         """
-        current_time = self.command_handler.get_current_time()
-        last_time = self.cache_manager.command_cooldowns.get(command_name, 0)
-        delay_time = self.bot.config.get("command_delay_time", 45)
+        result = await self.bot.cache_manager.get_command_cooldown(command_name)
+        return bool(result)
 
-        time_since_last = current_time - last_time
-        can_execute = time_since_last >= delay_time
-
-        if not isinstance(can_execute, bool):
-            return False
-
-        return can_execute
-
-    def update_cooldown(self, command_name: str) -> None:
+    async def update_cooldown(self, command_name: str, delay_time: int | None = None) -> None:
         """
         Update command cooldown timestamp.
 
         Args:
             command_name: Name of the command to update
+            delay_time: Optional cooldown duration in seconds (defaults to bot config)
         """
-        current_time = self.command_handler.get_current_time()
-        self.cache_manager.command_cooldowns[command_name] = int(current_time)
+        if delay_time is None:
+            delay_time = self.bot.config.get("command_delay_time", 45)
+        await self.bot.cache_manager.set_command_cooldown(command_name, delay_time)

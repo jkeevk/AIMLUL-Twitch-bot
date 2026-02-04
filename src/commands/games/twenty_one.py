@@ -315,7 +315,7 @@ class TwentyOneGame(BaseGame):
         Args:
             ctx: Command context
         """
-        if not self.check_cooldown("me"):
+        if not await self.check_cooldown("me"):
             return
 
         try:
@@ -356,7 +356,7 @@ class TwentyOneGame(BaseGame):
                 message += "\n🌟 Вы достигли максимального ранга! Вот же кому-то делать нехуй SubPricege"
 
             await ctx.send(message)
-            self.update_cooldown("me")
+            await self.update_cooldown("me")
 
         except Exception as e:
             self.logger.error(f"Error in 'me' command: {e}")
@@ -369,7 +369,7 @@ class TwentyOneGame(BaseGame):
         Args:
             ctx: Command context
         """
-        if not self.check_cooldown("leaders"):
+        if not await self.check_cooldown("leaders"):
             return
 
         try:
@@ -393,7 +393,7 @@ class TwentyOneGame(BaseGame):
                 message_lines.append(f"{medal} {username} - {rank} ({wins_str})")
 
             await ctx.send("\n".join(message_lines))
-            self.update_cooldown("leaders")
+            await self.update_cooldown("leaders")
 
         except Exception as e:
             self.logger.error(f"Error in 'leaders' command: {e}")
