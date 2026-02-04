@@ -3,6 +3,7 @@ import logging
 import sys
 
 from src.bot.manager import BotManager
+from src.core.redis_client import create_redis
 from src.utils.token_manager import TokenManager
 
 CONFIG_PATH = "/app/settings.ini"
@@ -18,7 +19,8 @@ async def main() -> None:
     try:
         logger.info("Starting bot...")
         token_manager = TokenManager(CONFIG_PATH)
-        manager = BotManager(token_manager)
+        redis = create_redis()
+        manager = BotManager(token_manager, redis=redis)
 
         await manager.start()
     except Exception as e:
@@ -26,6 +28,8 @@ async def main() -> None:
     finally:
         if manager and manager.bot:
             await manager.bot.close()
+        if manager and manager.redis:
+            await manager.redis.close()
 
 
 if __name__ == "__main__":

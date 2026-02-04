@@ -14,6 +14,8 @@ class TwitchAPI:
     for common Twitch API operations, such as user timeouts.
     """
 
+    BROADCASTER_TTL = 86400
+
     def __init__(self, bot: Any) -> None:
         """
         Initialize TwitchAPI client.
@@ -124,7 +126,7 @@ class TwitchAPI:
         """
         await self._ensure_session()
         if not broadcaster_id:
-            broadcaster_id = await self._get_user_id(channel_name)
+            broadcaster_id = await self.get_broadcaster_id(channel_name)
 
         if not broadcaster_id:
             self.logger.warning(f"Broadcaster not found: {channel_name}")
@@ -142,7 +144,36 @@ class TwitchAPI:
         raw_chatters = data.get("data", [])
         return [{"user_name": c["user_name"], "user_id": c["user_id"]} for c in raw_chatters]
 
-    async def timeout_user(self, user_id: str, channel_name: str, duration: int, reason: str) -> tuple[int, Any]:
+    async def get_broadcaster_id(self, channel_name: str) -> str | None:
+        """
+        Retrieve broadcaster ID from Redis cache.
+
+        If not found in cache, fetch from Twitch API and store in Redis.
+
+        Args:
+            channel_name: Name of the Twitch channel
+
+        Returns:
+            Broadcaster ID as a string, or None if not found
+        """
+        cached_id = await self.bot.cache_manager.redis.get(f"bot:broadcaster_id:{channel_name.lower()}")
+        if cached_id:
+            return str(cached_id)
+
+        user_id = await self._get_user_id(channel_name)
+        if user_id:
+            await self.bot.cache_manager.redis.setex(
+                f"bot:broadcaster_id:{channel_name.lower()}", self.BROADCASTER_TTL, user_id
+            )
+        return user_id
+
+    async def timeout_user(
+        self,
+        user_id: str,
+        channel_name: str,
+        duration: int,
+        reason: str,
+    ) -> tuple[int, Any]:
         """
         Issue timeout to a user in the specified channel.
 
@@ -156,7 +187,9 @@ class TwitchAPI:
             Tuple of (status_code, response_data)
         """
         await self._ensure_session()
-        broadcaster_id = await self._get_user_id(channel_name)
+
+        broadcaster_id = await self.get_broadcaster_id(channel_name)
+
         if not broadcaster_id:
             return 0, "Broadcaster not found"
 

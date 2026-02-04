@@ -1,178 +1,190 @@
 import asyncio
+import json
 import logging
-import time
+from dataclasses import asdict
 from typing import Any
 
-from twitchio import Chatter
+from redis.asyncio import Redis
 
-from src.commands.permissions import PRIVILEGED_USERS, is_privileged
-
-
-class UserIDCache:
-    """
-    Cache for storing user ID mappings with TTL and size limits.
-
-    Provides efficient storage and retrieval of username to user ID mappings
-    with automatic cleanup of expired entries.
-    """
-
-    def __init__(self, max_size: int = 1000, ttl: int = 3600) -> None:
-        """
-        Initialize the UserIDCache.
-
-        Args:
-            max_size: Maximum number of entries in the cache.
-            ttl: Time-to-live for cache entries in seconds.
-        """
-        self._cache: dict[str, tuple[str, float]] = {}
-        self._max_size: int = max_size
-        self._ttl: int = ttl
-
-    def get(self, username: str) -> str | None:
-        """
-        Retrieve user ID from cache.
-
-        Args:
-            username: Username to look up
-
-        Returns:
-            User ID if found and not expired, None otherwise
-        """
-        if username in self._cache:
-            user_id, timestamp = self._cache[username]
-            if time.time() - timestamp < self._ttl:
-                return user_id
-            del self._cache[username]
-        return None
-
-    def set(self, username: str, user_id: str) -> None:
-        """
-        Store user ID in cache.
-
-        Args:
-            username: Username to store
-            user_id: Corresponding user ID
-        """
-        if len(self._cache) >= self._max_size:
-            self._cleanup()
-        self._cache[username] = (user_id, time.time())
-
-    def _cleanup(self) -> None:
-        """Remove the oldest entries when the cache exceeds maximum size."""
-        if len(self._cache) >= self._max_size:
-            sorted_items = sorted(self._cache.items(), key=lambda x: x[1][1])
-            remove_count = max(1, len(sorted_items) // 10)
-            for key, _ in sorted_items[:remove_count]:
-                del self._cache[key]
+from src.api.twitch_api import TwitchAPI
+from src.commands.models.chatters import ChatterData
 
 
 class CacheManager:
     """
     Central cache manager for command handlers.
 
-    Manages various caches including user IDs, chatter list,
-    and cooldowns for commands and users.
+    Handles caching of:
+    - User cooldowns
+    - Command cooldowns
+    - Channel chatters
     """
 
-    def __init__(self) -> None:
-        """Initialize the CacheManager."""
-        self._cached_chatters: list[Any] = []
-        self._last_cache_update: float = 0
-        self._cache_ttl: int = 300
-        self.bot_nick: str = ""
-        self._cache_lock: asyncio.Lock = asyncio.Lock()
-        self.user_id_cache: UserIDCache = UserIDCache()
-        self._user_cooldowns: dict[str, float] = {}
-        self.command_cooldowns: dict[str, int] = {}
+    def __init__(self, redis: Redis) -> None:
+        """Initialize the CacheManager with a Redis instance."""
+        self.redis = redis
         self.logger = logging.getLogger(__name__)
+        self._lock = asyncio.Lock()
 
-    def _is_valid_target(self, chatter: Any) -> bool:
+    async def update_user_cooldown(self, user_id: str, cooldown: int = 30) -> None:
         """
-        Check if user is valid target for timeout actions.
+        Set a cooldown for a user.
 
         Args:
-            chatter: User object to validate
+            user_id: ID of the user.
+            cooldown: Cooldown duration in seconds.
+        """
+        try:
+            await self.redis.setex(f"bot:user_cd:{user_id}", cooldown, "1")
+        except Exception as e:
+            self.logger.warning(f"Failed to set cooldown for user {user_id}: {e}")
+
+    async def can_user_participate(self, user_id: str) -> bool:
+        """
+        Check if a user is allowed to participate (not on cooldown).
+
+        Args:
+            user_id: ID of the user.
 
         Returns:
-            True if the user can be targeted, False otherwise
+            True if the user can participate, False if on cooldown.
         """
-        if isinstance(chatter, dict) and "name" in chatter:
-            name = chatter["name"].lower()
-            return name != self.bot_nick.lower() and name not in (u.lower() for u in PRIVILEGED_USERS)
+        try:
+            exists: int = await self.redis.exists(f"bot:user_cd:{user_id}")
+            return exists == 0
+        except Exception as e:
+            self.logger.warning(f"Failed to check cooldown for user {user_id}: {e}")
+            return True
 
-        if hasattr(chatter, "name"):
-            name = chatter.name.lower()
-            return name != self.bot_nick.lower() and name not in (u.lower() for u in PRIVILEGED_USERS)
-
-        if isinstance(chatter, Chatter):
-            return not is_privileged(chatter)
-        return False
-
-    def filter_chatters(self, chatters: list[Any]) -> list[Any]:
+    async def set_command_cooldown(self, command: str, duration: int) -> None:
         """
-        Filter chatters list to valid targets.
+        Set a cooldown for a command.
 
         Args:
-            chatters: List of chatter objects
+            command: Name of the command.
+            duration: Cooldown duration in seconds.
+        """
+        try:
+            await self.redis.setex(f"bot:cmd_cd:{command.lower()}", duration, "1")
+        except Exception as e:
+            self.logger.warning(f"Failed to set cooldown for command '{command}': {e}")
+
+    async def get_command_cooldown(self, command: str) -> bool:
+        """
+        Check if a command is available (not on cooldown).
+
+        Args:
+            command: Name of the command.
 
         Returns:
-            Filtered list of valid targets
+            True if the command is available, False if on cooldown.
         """
-        return [chatter for chatter in chatters if self._is_valid_target(chatter)]
+        try:
+            exists: int = await self.redis.exists(f"bot:cmd_cd:{command.lower()}")
+            return exists == 0
+        except Exception as e:
+            self.logger.warning(f"Failed to check cooldown for command '{command}': {e}")
+            return True
 
-    async def update_chatters_cache(self, channel: Any, bot_nick: str) -> None:
+    async def get_or_update_chatters(self, channel_name: str, api: TwitchAPI) -> list[ChatterData]:
         """
-        Update the cached list of chatters for a channel.
+        Retrieve cached chatters for a channel, or fetch from API if not cached.
 
         Args:
-            channel: Twitch channel object containing `.chatters`.
-            bot_nick: Bot's username to exclude from cache.
+            channel_name: Name of the Twitch channel.
+            api: Twitch API client instance.
+
+        Returns:
+            List of ChatterData objects.
         """
-        async with self._cache_lock:
+        cached = await self.get_cached_chatters(channel_name)
+        if cached:
+            return cached
+
+        api_chatters = await api.get_chatters(channel_name)
+        normalized = [self._normalize_chatter(c) for c in api_chatters]
+        await self.update_chatters_cache(channel_name, normalized)
+        return normalized
+
+    async def get_cached_chatters(self, channel_name: str) -> list[ChatterData]:
+        """
+        Get chatters from Redis cache.
+
+        Args:
+            channel_name: Name of the Twitch channel.
+
+        Returns:
+            List of ChatterData if cache exists, else empty list.
+        """
+        key = f"bot:chatters:{channel_name.lower()}"
+        val = await self.redis.get(key)
+        if val:
             try:
-                self.bot_nick = bot_nick
-                self._cached_chatters = self.filter_chatters(channel.chatters)
-                self._last_cache_update = time.time()
-            except Exception as e:
-                self.logger.error("Cache update error", exc_info=e)
+                data = json.loads(val)
+                return [ChatterData(**c) for c in data]
+            except (json.JSONDecodeError, TypeError) as e:
+                self.logger.warning(f"Failed to load chatter cache for channel '{channel_name}': {e}")
+        return []
 
-    def get_cached_chatters(self) -> list[Any]:
+    async def update_chatters_cache(self, channel_name: str, chatters: list[ChatterData], ttl: int = 300) -> None:
         """
-        Get the cached chatters list.
-
-        Returns:
-            List of cached chatter objects
-        """
-        return self._cached_chatters
-
-    def should_update_cache(self) -> bool:
-        """
-        Check if cache needs updating.
-
-        Returns:
-            True if cache is empty or expired, False otherwise
-        """
-        return not self._cached_chatters or (time.time() - self._last_cache_update > self._cache_ttl)
-
-    def update_user_cooldown(self, user_id: str) -> None:
-        """
-        Update user participation cooldown.
+        Update the Redis cache with the list of chatters.
 
         Args:
-            user_id: User ID to update cooldown for
+            channel_name: Name of the Twitch channel.
+            chatters: List of ChatterData to cache.
+            ttl: Time to live in seconds for the cache (default 300 seconds).
         """
-        self._user_cooldowns[user_id] = time.time()
+        key = f"bot:chatters:{channel_name.lower()}"
+        try:
+            await self.redis.setex(key, ttl, json.dumps([asdict(c) for c in chatters]))
+        except Exception as e:
+            self.logger.warning(f"Failed to update chatter cache for channel '{channel_name}': {e}")
 
-    def can_user_participate(self, user_id: str, cooldown: int = 30) -> bool:
+    async def get_user_id(self, username: str, channel_name: str, api: TwitchAPI) -> str | None:
         """
-        Check if user can participate based on cooldown.
+        Get a user's Twitch ID using the cached chatters, fallback to API if missing.
 
         Args:
-            user_id: User ID to check
-            cooldown: Cooldown duration in seconds
+            username: Username to look up.
+            channel_name: Twitch channel name.
+            api: Twitch API client.
 
         Returns:
-            True if user can participate, False if on cooldown
+            User ID as string if found, else None.
         """
-        last_time = self._user_cooldowns.get(user_id, 0)
-        return (time.time() - last_time) >= cooldown
+        username_lower = username.lower()
+        chatters: list[ChatterData] = await self.get_or_update_chatters(channel_name, api)
+
+        for chatter in chatters:
+            if chatter.name.lower() == username_lower:
+                return chatter.id if chatter.id else None
+
+        self.logger.warning(f"User '{username}' not found in chatters for channel '{channel_name}'")
+        return None
+
+    @staticmethod
+    def _normalize_chatter(c: Any) -> ChatterData:
+        """
+        Normalize a raw Twitch API object or dict to a ChatterData instance.
+
+        Args:
+            c: Raw Twitch user object or dict.
+
+        Returns:
+            ChatterData object.
+        """
+        if hasattr(c, "id") and hasattr(c, "name"):
+            return ChatterData(
+                id=str(c.id),
+                name=c.name,
+                display_name=getattr(c, "display_name", c.name),
+            )
+        elif isinstance(c, dict):
+            return ChatterData(
+                id=str(c.get("user_id", "")),
+                name=c.get("user_name", ""),
+                display_name=c.get("user_name", ""),
+            )
+        else:
+            return ChatterData(id="", name=str(c), display_name=str(c))

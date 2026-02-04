@@ -4,11 +4,13 @@ import time
 from contextlib import suppress
 from typing import Any
 
+from redis.asyncio import Redis
 from twitchio import Message
 from twitchio.ext import commands
 
 from src.api.twitch_api import TwitchAPI
 from src.commands.command_handler import CommandHandler
+from src.commands.managers.cache_manager import CacheManager
 from src.commands.permissions import is_admin
 from src.commands.triggers.text_triggers import build_triggers
 from src.core.config_loader import load_settings
@@ -35,13 +37,14 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
     manual_override: bool
     is_connected: bool
 
-    def __init__(self, token_manager: TokenManager, bot_token: str) -> None:
+    def __init__(self, token_manager: TokenManager, bot_token: str, redis: Redis) -> None:
         """
         Initialize the Twitch bot.
 
         Args:
             token_manager: Manager for handling token refresh operations
             bot_token: Bot authentication token
+            redis: Redis connection
         """
         self.config = load_settings()
         self.token_manager = token_manager
@@ -49,6 +52,7 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
         self.scheduled_offline = False
         self.manual_override = False
         self.is_connected = False
+        self.redis = redis
 
         super().__init__(
             token=bot_token,
@@ -62,7 +66,7 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
 
         dsn: str | None = os.getenv("DATABASE_URL") or self.config["database"].get("dsn")
         self.db = Database(dsn) if dsn else None
-
+        self.cache_manager = CacheManager(self.redis)
         self.command_handler = CommandHandler(self)
         self.eventsub = EventSubManager(self)
         self.triggers = build_triggers(self)
@@ -95,6 +99,13 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
                 self.db = None
 
         await self.eventsub.setup()
+
+        if self.redis:
+            try:
+                await self.redis.ping()
+                logger.info("Redis OK")
+            except Exception as e:
+                logger.error("Redis ping failed", exc_info=e)
 
     async def event_message(self, message: Message) -> None:
         """

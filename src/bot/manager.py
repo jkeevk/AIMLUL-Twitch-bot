@@ -3,6 +3,7 @@ import logging
 from datetime import datetime
 
 from aiohttp import web
+from redis.asyncio import Redis
 
 from src.bot.twitch_bot import TwitchBot
 from src.core.config_loader import load_settings
@@ -31,14 +32,16 @@ class BotManager:
     health_runner: web.AppRunner | None
     scheduled_task: TaskType | None
 
-    def __init__(self, token_manager: TokenManager) -> None:
+    def __init__(self, token_manager: TokenManager, redis: Redis) -> None:
         """
         Initialize BotManager.
 
         Args:
             token_manager: Token manager instance.
+            redis: Redis instance.
         """
         self.token_manager = token_manager
+        self.redis = redis
         self.bot = None
         self._running = False
         self._restart_lock = asyncio.Lock()
@@ -108,7 +111,7 @@ class BotManager:
         while self._running:
             try:
                 token = await self.token_manager.get_access_token("BOT_TOKEN")
-                self.bot = TwitchBot(self.token_manager, token)
+                self.bot = TwitchBot(self.token_manager, token, redis=self.redis)
                 self.bot_task = asyncio.create_task(self.bot.start())
 
                 logger.info("Bot started")
@@ -150,7 +153,7 @@ class BotManager:
 
             try:
                 token = await self.token_manager.get_access_token("BOT_TOKEN")
-                self.bot = TwitchBot(self.token_manager, token)
+                self.bot = TwitchBot(self.token_manager, token, redis=self.redis)
                 self.bot_task = asyncio.create_task(self.bot.start())
                 self._websocket_error_count = 0
 
