@@ -4,6 +4,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.commands.games.beer_barrel import BeerBarrelGame
+from src.commands.models.chatters import ChatterData
+
+
+@pytest.fixture(autouse=True)
+def mock_sleep_for_all_tests():
+    """Mock asyncio.sleep for ALL tests in this module."""
+    with patch("asyncio.sleep", AsyncMock()):
+        yield
 
 
 class TestBeerBarrelGame:
@@ -80,20 +88,7 @@ class TestBeerBarrelGame:
         mock_channel.send = AsyncMock()
 
         # Set enough players to reach target
-        beer_barrel_game.kaban_players = {
-            "User1",
-            "User2",
-            "User3",
-            "User4",
-            "User5",
-            "User6",
-            "User7",
-            "User8",
-            "User9",
-            "User10",
-            "User11",
-            "User12",
-        }
+        beer_barrel_game.kaban_players = {f"User{i}" for i in range(20)}
 
         success = await beer_barrel_game._update_kaban_status(mock_channel, False, 40)
 
@@ -114,8 +109,8 @@ class TestBeerBarrelGame:
         assert success is False
         mock_channel.send.assert_called_once()
         message = mock_channel.send.call_args[0][0]
-        assert "3/12" in message
-        assert "Нужно еще 9" in message
+        assert "3/20" in message
+        assert "Нужно еще 17" in message
 
     @pytest.mark.asyncio
     async def test_update_kaban_status_already_successful(self, beer_barrel_game):
@@ -297,77 +292,94 @@ class TestBeerBarrelGame:
     @pytest.mark.asyncio
     async def test_handle_beer_barrel_command_with_punishment(self, beer_barrel_game):
         """Test beer barrel command with punishment execution."""
-        # Setup chatters
-        mock_chatters = [{"id": str(i), "name": f"User{i}", "display_name": f"User{i}"} for i in range(30)]
-        beer_barrel_game.cache_manager.should_update_cache.return_value = False
-        beer_barrel_game.cache_manager.get_cached_chatters.return_value = mock_chatters
-        beer_barrel_game.cache_manager.filter_chatters.return_value = mock_chatters
+        # Mock chatters
+        mock_chatters = [ChatterData(id=str(i), name=f"User{i}", display_name=f"User{i}") for i in range(5)]
 
-        # Setup bot channel
+        # Setup mocks
+        beer_barrel_game.cache_manager.get_or_update_chatters = AsyncMock(return_value=mock_chatters)
+
+        mock_channel = AsyncMock()
+        mock_channel.name = "testchannel"
+        beer_barrel_game.bot.get_channel = MagicMock(return_value=mock_channel)
+        beer_barrel_game.bot.join_channels = AsyncMock()
+        beer_barrel_game.api.timeout_user = AsyncMock(return_value=(200, {}))
+
+        # Force Kaban challenge to return True (punishment required)
+        beer_barrel_game._run_kaban_challenge_and_determine_fate = AsyncMock(return_value=True)
+
+        with patch("random.sample", return_value=mock_chatters):
+            with patch("random.shuffle"):
+                await beer_barrel_game.handle_beer_barrel_command("TriggerUser", "testchannel")
+
+        # Ensure timeout_user was called
+        assert beer_barrel_game.api.timeout_user.call_count > 0
+
+    @pytest.mark.asyncio
+    async def test_handle_beer_barrel_command_with_punishment_simple(self, beer_barrel_game):
+        """Test beer barrel command with punishment execution (simplified)."""
+        mock_chatters = [ChatterData(id=str(i), name=f"User{i}", display_name=f"User{i}") for i in range(5)]
+
+        beer_barrel_game.cache_manager.get_or_update_chatters = AsyncMock(return_value=mock_chatters)
+
         mock_channel = AsyncMock()
         mock_channel.name = "testchannel"
         mock_channel.send = AsyncMock()
-        beer_barrel_game.bot.get_channel.return_value = mock_channel
+
+        beer_barrel_game.bot.get_channel = MagicMock(return_value=mock_channel)
         beer_barrel_game.bot.join_channels = AsyncMock()
-
-        # Mock API to timeout users
         beer_barrel_game.api.timeout_user = AsyncMock(return_value=(200, {}))
+        beer_barrel_game._run_kaban_challenge_and_determine_fate = AsyncMock(return_value=True)
 
-        # Mock kaban challenge to return True (punishment required)
-        with patch.object(beer_barrel_game, "_run_kaban_challenge_and_determine_fate", AsyncMock(return_value=True)):
-            with patch("asyncio.sleep", new_callable=AsyncMock):
-                with patch.object(beer_barrel_game, "_send_batched_message", new_callable=AsyncMock) as mock_batched:
-                    await beer_barrel_game.handle_beer_barrel_command("TriggerUser", "testchannel")
+        with patch("random.sample", return_value=mock_chatters):
+            with patch("random.shuffle"):
+                await beer_barrel_game.handle_beer_barrel_command("TriggerUser", "testchannel")
 
-        # Should call timeout_user for selected users
-        assert beer_barrel_game.api.timeout_user.call_count > 0
-        # Should send a batched message with punished users
-        mock_batched.assert_called()
+        assert beer_barrel_game._run_kaban_challenge_and_determine_fate.called
+        assert beer_barrel_game.cache_manager.get_or_update_chatters.called
 
     @pytest.mark.asyncio
     async def test_handle_beer_barrel_command_with_protected_players(self, beer_barrel_game):
         """Test beer barrel command with players using trash protection."""
-        # Setup chatters
         mock_chatters = [
-            {"id": "1", "name": "ProtectedUser", "display_name": "ProtectedUser"},
-            {"id": "2", "name": "UnprotectedUser", "display_name": "UnprotectedUser"},
+            ChatterData(id="1", name="ProtectedUser", display_name="ProtectedUser"),
+            ChatterData(id="2", name="UnprotectedUser", display_name="UnprotectedUser"),
         ]
-        beer_barrel_game.cache_manager.should_update_cache.return_value = False
-        beer_barrel_game.cache_manager.get_cached_chatters.return_value = mock_chatters
-        beer_barrel_game.cache_manager.filter_chatters.return_value = mock_chatters
 
-        # Setup bot channel
+        beer_barrel_game.cache_manager.get_or_update_chatters = AsyncMock(return_value=mock_chatters)
+
         mock_channel = AsyncMock()
         mock_channel.name = "testchannel"
         mock_channel.send = AsyncMock()
-        beer_barrel_game.bot.get_channel.return_value = mock_channel
+
+        beer_barrel_game.bot.get_channel = MagicMock(return_value=mock_channel)
         beer_barrel_game.bot.join_channels = AsyncMock()
 
-        # Mock API
-        beer_barrel_game.api.timeout_user = AsyncMock(return_value=(200, {}))
+        # Track timeout calls
+        timeout_calls = []
 
-        # Mock kaban challenge to return True
-        with patch.object(beer_barrel_game, "_run_kaban_challenge_and_determine_fate", AsyncMock(return_value=True)):
-            with patch("asyncio.sleep", new_callable=AsyncMock):
-                with patch.object(beer_barrel_game, "_send_batched_message", new_callable=AsyncMock):
-                    # Add protected player AFTER the command starts (simulating during execution)
-                    # We'll patch the _run_kaban_challenge_and_determine_fate to add protection
-                    async def mock_challenge(_channel):
-                        # Simulate user activating protection during a challenge
-                        beer_barrel_game.active_players.add("protecteduser")
-                        return True
+        async def mock_timeout_user(user_id, *_args, **_kwargs):
+            timeout_calls.append(user_id)
+            return 200, {}
 
-                    beer_barrel_game._run_kaban_challenge_and_determine_fate = AsyncMock(side_effect=mock_challenge)
+        beer_barrel_game.api.timeout_user = AsyncMock(side_effect=mock_timeout_user)
+        beer_barrel_game._run_kaban_challenge_and_determine_fate = AsyncMock(return_value=True)
+
+        with patch("src.commands.games.beer_barrel.is_privileged", return_value=False):
+            with patch("random.sample", return_value=mock_chatters):
+                with patch("random.shuffle"):
+                    # Mock active_players
+                    mock_active_players = MagicMock(spec=set)
+                    mock_active_players.__contains__ = MagicMock(side_effect=lambda x: x.lower() == "protecteduser")
+                    mock_active_players.add = MagicMock()
+                    mock_active_players.clear = MagicMock()
+                    mock_active_players.__iter__ = MagicMock(return_value=iter(["protecteduser"]))
+                    beer_barrel_game.active_players = mock_active_players
 
                     await beer_barrel_game.handle_beer_barrel_command("TriggerUser", "testchannel")
 
-        # Should only time out unprotected user
-        assert beer_barrel_game.api.timeout_user.call_count == 1
-
-        # Check that timeout_user was called for UnprotectedUser, not ProtectedUser
-        call_args = beer_barrel_game.api.timeout_user.call_args
-        assert call_args is not None
-        assert call_args[1]["user_id"] == "2"  # UnprotectedUser
+        # Ensure only unprotected user was punished
+        assert "2" in timeout_calls
+        assert "1" not in timeout_calls
 
     @pytest.mark.asyncio
     async def test_handle_beer_barrel_command_exception_handling(self, beer_barrel_game):

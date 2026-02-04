@@ -1,7 +1,9 @@
+import time
 from dataclasses import dataclass
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from redis.asyncio import Redis
 from twitchio.ext.commands import Context
 
 from src.bot.manager import BotManager
@@ -10,6 +12,7 @@ from src.commands.command_handler import CommandHandler
 from src.commands.games.collectors_game import CollectorsGame
 from src.commands.games.simple_commands import SimpleCommandsGame
 from src.commands.games.twenty_one import TwentyOneGame
+from src.commands.managers.cache_manager import CacheManager
 from src.commands.triggers.text_triggers import build_triggers
 from src.utils.token_manager import TokenManager
 
@@ -25,7 +28,7 @@ def mock_token_manager() -> TokenManager:
 
 
 @pytest.fixture
-def bot_instance(mock_token_manager: TokenManager) -> TwitchBot:
+def bot_instance(mock_token_manager: TokenManager, mock_redis: AsyncMock) -> TwitchBot:
     """Return a TwitchBot instance with dependencies mocked, no start() called."""
     with patch(
         "src.bot.twitch_bot.load_settings",
@@ -35,7 +38,7 @@ def bot_instance(mock_token_manager: TokenManager) -> TwitchBot:
             "refresh_token_delay_time": 0.01,
         },
     ):
-        bot = TwitchBot(token_manager=mock_token_manager, bot_token="initial_token")
+        bot = TwitchBot(token_manager=mock_token_manager, bot_token="initial_token", redis=mock_redis)
 
     bot.db = MagicMock()
     bot.db.connect = AsyncMock()
@@ -50,25 +53,27 @@ def bot_instance(mock_token_manager: TokenManager) -> TwitchBot:
 
 
 @pytest.fixture
-def bot_manager(bot_instance: TwitchBot, mock_token_manager: TokenManager) -> BotManager:
+def bot_manager(bot_instance: TwitchBot, mock_token_manager: TokenManager, mock_redis: AsyncMock) -> BotManager:
     """Return a TwitchBot instance with dependencies mocked, no start() called."""
-    manager = BotManager(token_manager=mock_token_manager)
+    manager = BotManager(token_manager=mock_token_manager, redis=mock_redis)
     manager.bot = bot_instance
     return manager
 
 
 @dataclass
 class DummyAuthor:
-    """Represents a mock user/author for testing."""
+    id: str | int
+    name: str
+    display_name: str
+    privileged: bool = False
 
-    def __init__(self, id_: str | int, name: str, privileged: bool = False):
-        self.id = id_
+    def __init__(self, user_id: str | int, name: str, privileged: bool = False):
+        self.id = user_id
         self.name = name
-        self.is_mod = privileged
-        self.is_broadcaster = privileged
+        self.display_name = name
+        self.privileged = privileged
 
 
-@dataclass
 class DummyMessage:
     """Represents a mock chat message."""
 
@@ -78,7 +83,6 @@ class DummyMessage:
         self.channel.name = channel_name
 
 
-@dataclass
 class DummyChannel:
     """Represents a mock channel."""
 
@@ -87,7 +91,6 @@ class DummyChannel:
         self.chatters = []
 
 
-@dataclass
 class DummyCtx:
     """Represents a mock command context."""
 
@@ -102,7 +105,6 @@ class DummyCtx:
         self.sent.append(msg)
 
 
-@dataclass
 class DummyEvent:
     """Dummy EventSub event for testing reward handlers."""
 
@@ -119,20 +121,15 @@ class DummyEvent:
 
 
 @pytest.fixture
-def mock_bot():
+def mock_bot(mock_cache_manager):
     """Create a mocked TwitchBot instance for general testing."""
     bot = MagicMock(spec=TwitchBot)
     bot.active = True
     bot.api = AsyncMock()
     bot.db = AsyncMock()
-
-    # Add config attribute that some tests expect
     bot.config = {"admins": []}
-
-    # Create a real CommandHandler with the mocked bot
+    bot.cache_manager = mock_cache_manager
     command_handler = CommandHandler(bot)
-
-    # Mock the game instances inside a command handler
     command_handler.beer_challenge_game = AsyncMock()
     command_handler.beer_challenge_game.handle_beer_challenge_command = AsyncMock()
     command_handler.twenty_one_game = AsyncMock()
@@ -140,6 +137,35 @@ def mock_bot():
 
     bot.command_handler = command_handler
     return bot
+
+
+@pytest.fixture
+def beer_barrel_game():
+    """Fixture for BeerBarrelGame instance."""
+    from src.commands.games.beer_barrel import BeerBarrelGame
+
+    # Create a mock command handler
+    command_handler = MagicMock()
+    command_handler.bot = MagicMock()
+    command_handler.api = MagicMock()
+    command_handler.cache_manager = MagicMock()
+    command_handler.get_current_time = MagicMock(return_value=time.time())
+
+    # Create the game instance
+    game = BeerBarrelGame(command_handler)
+
+    # Ensure all attributes are properly set
+    game.bot = command_handler.bot
+    game.api = command_handler.api
+    game.cache_manager = command_handler.cache_manager
+    game.logger = MagicMock()
+
+    # Reset game state
+    game._is_running = False
+    game.active_players.clear()
+    game.kaban_players.clear()
+
+    return game
 
 
 @pytest.fixture
@@ -156,22 +182,30 @@ def mock_context():
 
 
 @pytest.fixture
-def mock_cache_manager() -> MagicMock:
-    """Mock cache manager for testing."""
-    cm = MagicMock()
-    cm.should_update_cache.return_value = False
-    cm.get_cached_chatters.return_value = []
-    cm.filter_chatters.return_value = []
-    cm.command_cooldowns = {}
-    return cm
+def mock_redis() -> AsyncMock:
+    """Mocked Redis instance for async cache manager."""
+    redis = AsyncMock(spec=Redis)
+    redis.get.return_value = None
+    redis.setex.return_value = True
+    redis.exists.return_value = 0
+    return redis
 
 
 @pytest.fixture
-def mock_user_manager() -> MagicMock:
-    """Mock user manager with async ID resolution."""
-    um = MagicMock()
-    um.get_user_id = AsyncMock(return_value="some-id")
-    return um
+def mock_cache_manager(mock_redis: AsyncMock) -> CacheManager:
+    """Return a CacheManager instance with Redis mocked."""
+    cm = CacheManager(redis=mock_redis)
+
+    cm.update_user_cooldown = AsyncMock()
+    cm.can_user_participate = AsyncMock(return_value=True)
+    cm.set_command_cooldown = AsyncMock()
+    cm.get_command_cooldown = AsyncMock(return_value=True)
+    cm.get_or_update_chatters = AsyncMock(return_value=[])
+    cm.get_cached_chatters = AsyncMock(return_value=[])
+    cm.update_chatters_cache = AsyncMock()
+    cm.get_user_id = AsyncMock(return_value=None)
+
+    return cm
 
 
 @pytest.fixture
@@ -183,16 +217,21 @@ def mock_api() -> MagicMock:
 
 
 @pytest.fixture
-def simple_commands_game(
-    mock_bot: MagicMock, mock_cache_manager: MagicMock, mock_user_manager: MagicMock, mock_api: MagicMock
-) -> SimpleCommandsGame:
-    """Fixture for the SimpleCommandsGame instance."""
-    handler = MagicMock()
-    handler.bot = mock_bot
+def simple_commands_game(mock_bot: MagicMock, mock_cache_manager: MagicMock, mock_api: MagicMock) -> SimpleCommandsGame:
+    """Fixture for the SimpleCommandsGame instance with proper bot/cache_manager."""
+    mock_bot.cache_manager = mock_cache_manager
+    mock_bot.api = mock_api
+    mock_bot.db = AsyncMock()
+
+    from src.commands.command_handler import CommandHandler
+
+    handler = CommandHandler(bot=mock_bot)
+
     handler.cache_manager = mock_cache_manager
-    handler.user_manager = mock_user_manager
     handler.api = mock_api
-    handler.get_current_time.return_value = 1000
+    handler.simple_commands_game = None
+
+    from src.commands.games.simple_commands import SimpleCommandsGame
 
     game = SimpleCommandsGame(command_handler=handler)
     game.bot = mock_bot
@@ -211,14 +250,11 @@ def twenty_one_game() -> TwentyOneGame:
 
 
 @pytest.fixture
-def collectors_game(
-    mock_bot: MagicMock, mock_cache_manager: MagicMock, mock_user_manager: MagicMock, mock_api: MagicMock
-) -> CollectorsGame:
+def collectors_game(mock_bot: MagicMock, mock_cache_manager: MagicMock, mock_api: MagicMock) -> CollectorsGame:
     """Fixture for the CollectorsGame instance."""
     handler = MagicMock()
     handler.bot = mock_bot
     handler.cache_manager = mock_cache_manager
-    handler.user_manager = mock_user_manager
     handler.api = mock_api
 
     game = CollectorsGame(command_handler=handler)

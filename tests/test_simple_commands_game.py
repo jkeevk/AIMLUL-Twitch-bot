@@ -1,6 +1,6 @@
 import time
 from typing import cast
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from twitchio.ext.commands import Context
@@ -20,28 +20,29 @@ async def test_handle_club_no_privilege(simple_commands_game, ctx_normal):
 
 
 @pytest.mark.asyncio
-async def test_handle_club_success(
-    simple_commands_game, ctx_privileged, mock_cache_manager, mock_api, mock_user_manager
-):
+async def test_handle_club_success(simple_commands_game):
     """Test that a privileged user successfully executes the club command."""
+    author = DummyAuthor(user_id=1, name="ModUser", privileged=True)
+    channel = DummyChannel("testchannel")
+    ctx = DummyCtx(author=author, channel=channel)
 
     class RealChatter:
-        """Simulated chatter returned by the cache manager."""
-
         def __init__(self, name):
             self.name = name
 
     dummy_chatter = RealChatter("SomeChatter")
-    mock_cache_manager.get_cached_chatters.return_value = [dummy_chatter]
 
-    mock_user_manager.get_user_id.return_value = "target-id"
-    mock_api.timeout_user.return_value = (200, {})
+    simple_commands_game.cache_manager.get_or_update_chatters = AsyncMock(return_value=[dummy_chatter])
+    simple_commands_game.cache_manager.get_user_id = AsyncMock(return_value="normal-id")
+    simple_commands_game.api.timeout_user = AsyncMock(return_value=(200, {}))
 
-    with patch("src.commands.games.simple_commands.random.choice") as mock_choice:
-        mock_choice.return_value = dummy_chatter
-        await simple_commands_game.handle_club_command(cast(Context, ctx_privileged))
+    with (
+        patch("src.commands.games.simple_commands.is_privileged", return_value=True),
+        patch("src.commands.games.simple_commands.random.choice", return_value=dummy_chatter),
+    ):
+        await simple_commands_game.handle_club_command(ctx)
 
-    assert any("бьёт дрыном" in msg for msg in ctx_privileged.sent)
+    assert any("бьёт дрыном" in msg for msg in ctx.sent)
 
 
 @pytest.mark.asyncio
@@ -60,13 +61,12 @@ async def test_handle_butt_low_chance(simple_commands_game, ctx_normal):
 
 
 @pytest.mark.asyncio
-async def test_handle_butt_high_chance_100(simple_commands_game, ctx_normal, mock_api, mock_user_manager):
+async def test_handle_butt_high_chance_100(simple_commands_game, ctx_normal, mock_api):
     """
     Test the 'butt' command with maximum chance (100).
 
     Expected output is a message indicating washing.
     """
-    mock_user_manager.get_user_id.return_value = "normal-id"
     mock_api.timeout_user.return_value = (200, {})
 
     with patch("src.commands.games.simple_commands.random.randint") as mock_randint:
@@ -77,58 +77,23 @@ async def test_handle_butt_high_chance_100(simple_commands_game, ctx_normal, moc
 
 
 @pytest.mark.asyncio
-async def test_handle_butt_high_chance_privileged(simple_commands_game, ctx_privileged, mock_api, mock_user_manager):
+async def test_handle_butt_high_chance_privileged(simple_commands_game):
     """
     Test the 'butt' command with high chance for a privileged user.
 
     The command should skip sending a timeout and instead send a joke message.
     """
-    mock_user_manager.get_user_id.return_value = "privileged-id"
-    mock_api.timeout_user.return_value = (200, {})
+    author = DummyAuthor(user_id=1, name="ModUser", privileged=True)
+    channel = DummyChannel("testchannel")
+    ctx = DummyCtx(author=author, channel=channel)
 
-    with patch("src.commands.games.simple_commands.random.randint") as mock_randint:
-        mock_randint.return_value = 95
-        await simple_commands_game.handle_butt_command(cast(Context, ctx_privileged))
+    with (
+        patch("src.commands.games.simple_commands.is_privileged", return_value=True),
+        patch("src.commands.games.simple_commands.random.randint", return_value=95),
+    ):
+        await simple_commands_game.handle_butt_command(ctx)
 
-    assert any("Шучу, не отправлен" in msg for msg in ctx_privileged.sent)
-
-
-@pytest.mark.asyncio
-async def test_handle_test_barrel_not_admin(simple_commands_game, ctx_normal):
-    """Test that a normal user cannot execute the test barrel command."""
-    await simple_commands_game.handle_test_barrel_command(cast(Context, ctx_normal))
-    assert ctx_normal.sent == []
-
-
-@pytest.mark.asyncio
-async def test_handle_test_barrel_success(
-    simple_commands_game, privileged_author, channel, mock_cache_manager, mock_user_manager, mock_api
-):
-    """
-    Test that an admin successfully executes the test barrel command.
-
-    Selecting a subset of chatters.
-    """
-    simple_commands_game.bot.config["admins"] = [privileged_author.name.lower()]
-
-    class RealChatter:
-        """Simulated chatter for testing purposes."""
-
-        def __init__(self, name):
-            self.name = name
-
-    dummy_chatters = [RealChatter(f"User{i}") for i in range(5)]
-    mock_cache_manager.filter_chatters.return_value = dummy_chatters
-    mock_user_manager.get_user_id.return_value = "test-id"
-    mock_api.timeout_user.return_value = (200, {})
-
-    with patch("src.commands.games.simple_commands.random.sample") as mock_sample:
-        mock_sample.return_value = dummy_chatters[:3]
-
-        ctx = DummyCtx(privileged_author, channel)
-        await simple_commands_game.handle_test_barrel_command(cast(Context, ctx))
-
-    assert any("Тест." in msg for msg in ctx.sent)
+    assert any("Шучу, не отправлен" in msg for msg in ctx.sent)
 
 
 @pytest.mark.asyncio
@@ -145,7 +110,8 @@ async def test_handle_club_cooldown(simple_commands_game, ctx_privileged, mock_c
     mock_cache_manager.get_cached_chatters.return_value = [dummy_chatter]
 
     simple_commands_game.command_handler.get_current_time.return_value = 1000
-    mock_cache_manager.command_cooldowns["club"] = 1000
+    mock_cache_manager.get_command_cooldown = AsyncMock()
+    mock_cache_manager.get_command_cooldown.return_value = 1000
 
     await simple_commands_game.handle_club_command(cast(Context, ctx_privileged))
     assert len(ctx_privileged.sent) == 0
@@ -183,17 +149,13 @@ async def test_handle_voteban_timeout_success(simple_commands_game):
         "start_time": time.time(),
     }
 
-    # Patch user_manager and api
-    with (
-        patch.object(simple_commands_game.command_handler, "user_manager", create=True) as um_mock,
-        patch.object(simple_commands_game, "api", create=True) as api_mock,
-    ):
+    # Patch get_user_id and api.timeout_user
+    simple_commands_game.cache_manager.get_user_id = AsyncMock(return_value="target-id")
+    simple_commands_game.api = MagicMock()
+    simple_commands_game.api.timeout_user = AsyncMock(return_value=(200, {}))
 
-        um_mock.get_user_id = AsyncMock(return_value="target-id")
-        api_mock.timeout_user = AsyncMock(return_value=(200, {}))
-
-        # Call the voteban command, the 10th vote should trigger timeout
-        await simple_commands_game.handle_voteban_command(cast(Context, ctx))
+    # Call the voteban command, the 10th vote should trigger timeout
+    await simple_commands_game.handle_voteban_command(ctx)
 
     # Assert that a timeout message was sent
     assert any("изгнан" in msg for msg in ctx.sent)

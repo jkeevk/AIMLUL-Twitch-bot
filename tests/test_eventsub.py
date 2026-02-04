@@ -8,6 +8,13 @@ from src.eventsub.manager import EventSubManager
 from tests.conftest import DummyEvent
 
 
+@pytest.fixture(autouse=True)
+def mock_sleep_for_all_tests():
+    """Mock asyncio.sleep for ALL tests in this module."""
+    with patch("asyncio.sleep", AsyncMock()):
+        yield
+
+
 class TestEventSubManager:
     """Tests for EventSubManager class."""
 

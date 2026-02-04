@@ -109,9 +109,9 @@ async def test_close_cancels_token_task_and_closes_db(bot_manager: BotManager):
 
 
 @pytest.mark.asyncio
-async def test_watchdog_restarts_bot_after_unhealthy(mock_token_manager: TokenManager):
+async def test_watchdog_restarts_bot_after_unhealthy(mock_token_manager: TokenManager, mock_redis: AsyncMock):
     """Test that watchdog triggers bot restart after 3 consecutive unhealthy checks."""
-    manager = BotManager(token_manager=mock_token_manager)
+    manager = BotManager(token_manager=mock_token_manager, redis=mock_redis)
     manager._running = True
     manager.bot = MagicMock(spec=TwitchBot)
     manager.bot.is_connected = False
@@ -136,9 +136,9 @@ async def test_watchdog_restarts_bot_after_unhealthy(mock_token_manager: TokenMa
 
 
 @pytest.mark.asyncio
-async def test_healthcheck_returns_ok_when_bot_healthy(mock_token_manager: TokenManager):
+async def test_healthcheck_returns_ok_when_bot_healthy(mock_token_manager: TokenManager, mock_redis: AsyncMock):
     """Test that /health returns 200 if bot is running and websocket is healthy."""
-    manager = BotManager(token_manager=mock_token_manager)
+    manager = BotManager(token_manager=mock_token_manager, redis=mock_redis)
     manager._running = True
     manager.bot = MagicMock(spec=TwitchBot)
     manager.bot.is_connected = True
@@ -154,9 +154,11 @@ async def test_healthcheck_returns_ok_when_bot_healthy(mock_token_manager: Token
 
 
 @pytest.mark.asyncio
-async def test_healthcheck_returns_unhealthy_when_bot_not_connected(mock_token_manager: TokenManager):
+async def test_healthcheck_returns_unhealthy_when_bot_not_connected(
+    mock_token_manager: TokenManager, mock_redis: AsyncMock
+):
     """Test that /health returns 500 if bot is not running or websocket unhealthy."""
-    manager = BotManager(token_manager=mock_token_manager)
+    manager = BotManager(token_manager=mock_token_manager, redis=mock_redis)
     manager._running = True
     manager.bot = MagicMock(spec=TwitchBot)
     manager.bot.is_connected = False
@@ -172,9 +174,9 @@ async def test_healthcheck_returns_unhealthy_when_bot_not_connected(mock_token_m
 
 
 @pytest.mark.asyncio
-async def test_scheduled_bot_activation_sends_message(mock_token_manager: TokenManager):
+async def test_scheduled_bot_activation_sends_message(mock_token_manager: TokenManager, mock_redis: AsyncMock):
     """Test bot disables itself during offline schedule and sends a notification."""
-    bot = TwitchBot(token_manager=mock_token_manager, bot_token="fake_token")
+    bot = TwitchBot(token_manager=mock_token_manager, redis=mock_redis, bot_token="fake_token")
     bot.active = True
     bot.is_connected = True
     bot.db = MagicMock()
@@ -182,7 +184,7 @@ async def test_scheduled_bot_activation_sends_message(mock_token_manager: TokenM
 
     bot.send_message = AsyncMock()
 
-    manager = BotManager(token_manager=mock_token_manager)
+    manager = BotManager(token_manager=mock_token_manager, redis=mock_redis)
     manager.bot = bot
 
     bot.config["schedule"] = {
