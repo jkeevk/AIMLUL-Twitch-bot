@@ -47,7 +47,7 @@ class BaseGame(ABC):
         Returns:
             True if command can be executed, False if still on cooldown
         """
-        result = await self.bot.cache_manager.get_command_cooldown(command_name)
+        result = await self.bot.cache_manager.is_command_available(command_name)
         return bool(result)
 
     async def update_cooldown(self, command_name: str, delay_time: int | None = None) -> None:

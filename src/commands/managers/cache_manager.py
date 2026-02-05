@@ -9,6 +9,9 @@ from redis.asyncio import Redis
 from src.api.twitch_api import TwitchAPI
 from src.commands.models.chatters import ChatterData
 
+USER_CD_KEY = "bot:user_cd:{}"
+CMD_CD_KEY = "bot:cmd_cd:{}"
+CHATTERS_KEY = "bot:chatters:{}"
 
 class CacheManager:
     """
@@ -35,7 +38,7 @@ class CacheManager:
             cooldown: Cooldown duration in seconds.
         """
         try:
-            await self.redis.setex(f"bot:user_cd:{user_id}", cooldown, "1")
+            await self.redis.setex(USER_CD_KEY.format(user_id), cooldown, "1")
         except Exception as e:
             self.logger.warning(f"Failed to set cooldown for user {user_id}: {e}")
 
@@ -50,7 +53,7 @@ class CacheManager:
             True if the user can participate, False if on cooldown.
         """
         try:
-            exists: int = await self.redis.exists(f"bot:user_cd:{user_id}")
+            exists: int = await self.redis.exists(USER_CD_KEY.format(user_id))
             return exists == 0
         except Exception as e:
             self.logger.warning(f"Failed to check cooldown for user {user_id}: {e}")
@@ -65,11 +68,15 @@ class CacheManager:
             duration: Cooldown duration in seconds.
         """
         try:
-            await self.redis.setex(f"bot:cmd_cd:{command.lower()}", duration, "1")
+            await self.redis.setex(
+                CMD_CD_KEY.format(command.lower()),
+                duration,
+                "1",
+            )
         except Exception as e:
             self.logger.warning(f"Failed to set cooldown for command '{command}': {e}")
 
-    async def get_command_cooldown(self, command: str) -> bool:
+    async def is_command_available(self, command: str) -> bool:
         """
         Check if a command is available (not on cooldown).
 
@@ -80,7 +87,9 @@ class CacheManager:
             True if the command is available, False if on cooldown.
         """
         try:
-            exists: int = await self.redis.exists(f"bot:cmd_cd:{command.lower()}")
+            exists: int = await self.redis.exists(
+                CMD_CD_KEY.format(command.lower())
+            )
             return exists == 0
         except Exception as e:
             self.logger.warning(f"Failed to check cooldown for command '{command}': {e}")
@@ -101,10 +110,8 @@ class CacheManager:
         if cached:
             return cached
 
-        api_chatters = await api.get_chatters(channel_name)
-        normalized = [self._normalize_chatter(c) for c in api_chatters]
-        await self.update_chatters_cache(channel_name, normalized)
-        return normalized
+        chatters = await self._fetch_and_cache_chatters(channel_name, api)
+        return chatters
 
     async def get_cached_chatters(self, channel_name: str) -> list[ChatterData]:
         """
@@ -116,7 +123,7 @@ class CacheManager:
         Returns:
             List of ChatterData if cache exists, else empty list.
         """
-        key = f"bot:chatters:{channel_name.lower()}"
+        key = CHATTERS_KEY.format(channel_name.lower())
         val = await self.redis.get(key)
         if val:
             try:
@@ -126,7 +133,7 @@ class CacheManager:
                 self.logger.warning(f"Failed to load chatter cache for channel '{channel_name}': {e}")
         return []
 
-    async def update_chatters_cache(self, channel_name: str, chatters: list[ChatterData], ttl: int = 300) -> None:
+    async def update_chatters_cache(self, channel_name: str, chatters: list[ChatterData], ttl: int = 1800) -> None:
         """
         Update the Redis cache with the list of chatters.
 
@@ -135,7 +142,7 @@ class CacheManager:
             chatters: List of ChatterData to cache.
             ttl: Time to live in seconds for the cache (default 300 seconds).
         """
-        key = f"bot:chatters:{channel_name.lower()}"
+        key = CHATTERS_KEY.format(channel_name.lower())
         try:
             await self.redis.setex(key, ttl, json.dumps([asdict(c) for c in chatters]))
         except Exception as e:
@@ -154,14 +161,42 @@ class CacheManager:
             User ID as string if found, else None.
         """
         username_lower = username.lower()
-        chatters: list[ChatterData] = await self.get_or_update_chatters(channel_name, api)
+        channel_lower = channel_name.lower()
 
-        for chatter in chatters:
-            if chatter.name.lower() == username_lower:
-                return chatter.id if chatter.id else None
+        chatters: list[ChatterData] = await self.get_cached_chatters(channel_lower)
 
-        self.logger.warning(f"User '{username}' not found in chatters for channel '{channel_name}'")
-        return None
+        user_id = self._find_user_id(chatters, username_lower)
+        if user_id:
+            return user_id
+
+        async with self._lock:
+            normalized = await self._fetch_and_cache_chatters(channel_lower, api)
+            return self._find_user_id(normalized, username_lower)
+
+    async def force_refresh_chatters(self, channel_name: str, api: TwitchAPI) -> list[ChatterData]:
+        """
+        Force refresh chatters from API and update cache.
+
+        Args:
+            channel_name: Name of the Twitch channel.
+            api: Twitch API client instance.
+
+        Returns:
+            List of ChatterData objects.
+        """
+        try:
+            self.logger.info(f"Forcing chatters refresh for channel '{channel_name}'")
+            return await self._fetch_and_cache_chatters(channel_name, api)
+        except Exception as e:
+            self.logger.error(f"Failed to force refresh chatters for '{channel_name}': {e}")
+            cached = await self.get_cached_chatters(channel_name)
+            return cached if cached else []
+
+    async def _fetch_and_cache_chatters(self, channel_name: str, api: TwitchAPI, ttl: int = 1800) -> list[ChatterData]:
+        api_chatters = await api.get_chatters(channel_name)
+        normalized = [self._normalize_chatter(c) for c in api_chatters]
+        await self.update_chatters_cache(channel_name, normalized, ttl)
+        return normalized
 
     @staticmethod
     def _normalize_chatter(c: Any) -> ChatterData:
@@ -188,3 +223,20 @@ class CacheManager:
             )
         else:
             return ChatterData(id="", name=str(c), display_name=str(c))
+
+    @staticmethod
+    def _find_user_id(chatters: list[ChatterData], username_lower: str) -> str | None:
+        """
+        Find a user's Twitch ID using the cached chatters.
+
+        Args:
+            chatters: List of ChatterData to cache.
+            username_lower: Username to look up.
+
+        Returns:
+            User ID as string if found, else None.
+        """
+        for c in chatters:
+            if c.name.lower() == username_lower:
+                return c.id or None
+        return None
