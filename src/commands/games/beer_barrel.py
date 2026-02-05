@@ -171,7 +171,8 @@ class BeerBarrelGame(BaseGame):
         self.kaban_players.clear()
 
         try:
-            chatters = await self.cache_manager.get_or_update_chatters(channel_name, self.api)
+            self.logger.info(f"Fetching fresh chatters list for Beer Barrel in {channel_name}")
+            chatters = await self.cache_manager.force_refresh_chatters(channel_name, self.api)
             random.shuffle(chatters)
             self.logger.info(f"Available chatters for selection: {len(chatters)}")
 

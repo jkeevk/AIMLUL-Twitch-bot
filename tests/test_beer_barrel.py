@@ -296,7 +296,7 @@ class TestBeerBarrelGame:
         mock_chatters = [ChatterData(id=str(i), name=f"User{i}", display_name=f"User{i}") for i in range(5)]
 
         # Setup mocks
-        beer_barrel_game.cache_manager.get_or_update_chatters = AsyncMock(return_value=mock_chatters)
+        beer_barrel_game.cache_manager.force_refresh_chatters = AsyncMock(return_value=mock_chatters)
 
         mock_channel = AsyncMock()
         mock_channel.name = "testchannel"
@@ -319,7 +319,7 @@ class TestBeerBarrelGame:
         """Test beer barrel command with punishment execution (simplified)."""
         mock_chatters = [ChatterData(id=str(i), name=f"User{i}", display_name=f"User{i}") for i in range(5)]
 
-        beer_barrel_game.cache_manager.get_or_update_chatters = AsyncMock(return_value=mock_chatters)
+        beer_barrel_game.cache_manager.force_refresh_chatters = AsyncMock(return_value=mock_chatters)
 
         mock_channel = AsyncMock()
         mock_channel.name = "testchannel"
@@ -335,7 +335,7 @@ class TestBeerBarrelGame:
                 await beer_barrel_game.handle_beer_barrel_command("TriggerUser", "testchannel")
 
         assert beer_barrel_game._run_kaban_challenge_and_determine_fate.called
-        assert beer_barrel_game.cache_manager.get_or_update_chatters.called
+        assert beer_barrel_game.cache_manager.force_refresh_chatters.called
 
     @pytest.mark.asyncio
     async def test_handle_beer_barrel_command_with_protected_players(self, beer_barrel_game):
@@ -345,7 +345,7 @@ class TestBeerBarrelGame:
             ChatterData(id="2", name="UnprotectedUser", display_name="UnprotectedUser"),
         ]
 
-        beer_barrel_game.cache_manager.get_or_update_chatters = AsyncMock(return_value=mock_chatters)
+        beer_barrel_game.cache_manager.force_refresh_chatters = AsyncMock(return_value=mock_chatters)
 
         mock_channel = AsyncMock()
         mock_channel.name = "testchannel"
