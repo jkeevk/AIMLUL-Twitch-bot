@@ -292,6 +292,7 @@ class TestEventSubHandlers:
         mock_event = MagicMock()
         mock_event.data = MagicMock()
         mock_event.data.user = MagicMock()
+        mock_event.data.user.id = "123"
         mock_event.data.user.name = "TestUser"
         mock_event.data.broadcaster = MagicMock()
         mock_event.data.broadcaster.name = "testchannel"
@@ -307,7 +308,7 @@ class TestEventSubHandlers:
         await beer_challenge_handler(mock_event, mock_bot)
 
         # Verify command was called
-        mock_bot.command_handler.handle_beer_challenge.assert_awaited_once_with("TestUser", "10", "testchannel")
+        mock_bot.command_handler.handle_beer_challenge.assert_awaited_once_with("123", "TestUser", "10", "testchannel")
 
 
 class TestEventSubEventCallbacks:
@@ -363,7 +364,7 @@ class TestEventSubEventCallbacks:
         await beer_challenge_handler(mock_eventsub_event, mock_bot)
 
         # Verify the command was called
-        mock_bot.command_handler.handle_beer_challenge.assert_awaited_once_with("TestUser", "5", "testchannel")
+        mock_bot.command_handler.handle_beer_challenge.assert_awaited_once_with("123", "TestUser", "5", "testchannel")
 
 
 @pytest.mark.asyncio
@@ -405,7 +406,7 @@ async def test_full_eventsub_flow():
     await beer_challenge_handler(mock_event, mock_bot)
 
     # Step 4: Verify the command was called
-    mock_bot.command_handler.handle_beer_challenge.assert_awaited_once_with("TestUser", "не число", "testbroadcaster")
+    mock_bot.command_handler.handle_beer_challenge.assert_awaited_once_with("456", "TestUser", "не число", "testbroadcaster")
 
     # Step 5: Test cleanup
     await manager.close()

@@ -80,9 +80,9 @@ class CommandHandler:
         """Handle beer barrel command."""
         await self.beer_barrel_game.handle_beer_barrel_command(user_name, channel_name)
 
-    async def handle_beer_challenge(self, user_name: str, user_input: str, channel_name: str) -> None:
+    async def handle_beer_challenge(self, user_id: str, user_name: str, user_input: str, channel_name: str) -> None:
         """Handle beer challenge command."""
-        await self.beer_challenge_game.handle_beer_challenge_command(user_name, user_input, channel_name)
+        await self.beer_challenge_game.handle_beer_challenge_command(user_id, user_name, user_input, channel_name)
 
     async def handle_twenty_one(self, ctx: Any) -> None:
         """Handle twenty-one game command."""

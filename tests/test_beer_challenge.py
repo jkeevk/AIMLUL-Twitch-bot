@@ -20,7 +20,7 @@ async def test_reward_handlers_call_command(mock_bot):
         mock_bot.active = True
         await handler(event, mock_bot)
 
-        mock_command.assert_awaited_once_with("TestUser", "test input", "testbroadcaster")
+        mock_command.assert_awaited_once_with("123", "TestUser", "test input", "testbroadcaster")
 
 
 @pytest.mark.asyncio
@@ -56,12 +56,13 @@ async def test_beer_challenge_non_numeric_input():
     assert call_args is not None
 
     # Check that the arguments match what we expect
-    # handle_beer_challenge(user_name, user_input, channel_name)
+    # handle_beer_challenge(user_id, user_name, user_input, channel_name)
     args, kwargs = call_args
-    assert len(args) == 3
-    assert args[0] == "TestUser"  # user_name
-    assert args[1] == non_numeric_input  # user_input
-    assert args[2] == "testbroadcaster"  # channel_name
+    assert len(args) == 4
+    assert args[0] == "123"
+    assert args[1] == "TestUser"  # user_name
+    assert args[2] == non_numeric_input  # user_input
+    assert args[3] == "testbroadcaster"  # channel_name
 
 
 @pytest.mark.asyncio
@@ -98,10 +99,11 @@ async def test_beer_challenge_empty_input():
     # Check that the arguments match what we expect
     # handle_beer_challenge(user_name, user_input, channel_name)
     args, kwargs = call_args
-    assert len(args) == 3
-    assert args[0] == "TestUser"  # user_name
-    assert args[1] == ""  # user_input (empty)
-    assert args[2] == "testbroadcaster"  # channel_name
+    assert len(args) == 4
+    assert args[0] == "123"
+    assert args[1] == "TestUser"  # user_name
+    assert args[2] == ""  # user_input
+    assert args[3] == "testbroadcaster"  # channel_name
 
 
 @pytest.mark.asyncio
@@ -138,11 +140,11 @@ async def test_beer_challenge_whitespace_input():
     # Check that the arguments match what we expect
     # handle_beer_challenge(user_name, user_input, channel_name)
     args, kwargs = call_args
-    assert len(args) == 3
-    assert args[0] == "TestUser"  # user_name
-    assert args[1] == "   "  # user_input (whitespace)
-    assert args[2] == "testbroadcaster"  # channel_name
-
+    assert len(args) == 4
+    assert args[0] == "123"
+    assert args[1] == "TestUser"  # user_name
+    assert args[2] == "   "  # user_input (whitespace)
+    assert args[3] == "testbroadcaster"  # channel_name
 
 @pytest.mark.asyncio
 async def test_beer_challenge_mixed_input():
@@ -179,10 +181,11 @@ async def test_beer_challenge_mixed_input():
     # Check that the arguments match what we expect
     # handle_beer_challenge(user_name, user_input, channel_name)
     args, kwargs = call_args
-    assert len(args) == 3
-    assert args[0] == "TestUser"  # user_name
-    assert args[1] == mixed_input  # user_input
-    assert args[2] == "testbroadcaster"  # channel_name
+    assert len(args) == 4
+    assert args[0] == "123"
+    assert args[1] == "TestUser"  # user_name
+    assert args[2] == mixed_input  # user_input
+    assert args[3] == "testbroadcaster"  # channel_name
 
 
 @pytest.mark.asyncio
@@ -206,6 +209,7 @@ async def test_beer_challenge_game_non_numeric_logic():
     command_handler = CommandHandler(mock_bot)
 
     # Now we need to test the actual method logic
+    user_id = "123"
     user_name = "TestUser"
     channel_name = "testbroadcaster"
 
@@ -213,7 +217,7 @@ async def test_beer_challenge_game_non_numeric_logic():
     non_numeric_input = "не число"
 
     # Call the actual method
-    await command_handler.beer_challenge_game.handle_beer_challenge_command(user_name, non_numeric_input, channel_name)
+    await command_handler.beer_challenge_game.handle_beer_challenge_command(user_id, user_name, non_numeric_input, channel_name)
 
     # Verify that "send" was called with the error message
     mock_channel.send.assert_awaited_once()
@@ -265,7 +269,7 @@ async def test_beer_challenge_game_logic_with_mocks():
     command_handler.beer_challenge_game.logger = MagicMock()
 
     # Now test the actual logic
-    await command_handler.beer_challenge_game.handle_beer_challenge_command("TestUser", "не число", "testchannel")
+    await command_handler.beer_challenge_game.handle_beer_challenge_command("123", "TestUser", "не число", "testchannel")
 
     # Verify error message was sent
     mock_channel.send.assert_awaited_once()

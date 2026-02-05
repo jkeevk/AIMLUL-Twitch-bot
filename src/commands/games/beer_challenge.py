@@ -9,11 +9,12 @@ from src.commands.permissions import is_privileged
 class BeerChallengeGame(BaseGame):
     """Handles the Beer Challenge reward without requiring a chat context."""
 
-    async def handle_beer_challenge_command(self, user_name: str, user_input: str, channel_name: str) -> None:
+    async def handle_beer_challenge_command(self, user_id: str, user_name: str, user_input: str, channel_name: str) -> None:
         """
         Handle the Beer Challenge reward command for any user.
 
         Args:
+            user_id (str): The id of the user.
             user_name: The username of the user.
             user_input: The user input (expected to be a number).
             channel_name: The channel name where the reward was redeemed.
@@ -36,9 +37,6 @@ class BeerChallengeGame(BaseGame):
             roll = random.randint(1, 100)
 
             success = roll <= success_chance
-            target_id = await self.cache_manager.get_user_id(user_name, channel_name, self.api)
-            if not target_id:
-                return
             if success:
 
                 if amount <= 5:
@@ -54,7 +52,7 @@ class BeerChallengeGame(BaseGame):
                     msg = f"@{user_name} - не человек, зверь нахуй NixyiaSobi"
                     tickets_awarded = 5
 
-                await self.db.add_tickets(target_id, user_name, tickets_awarded)
+                await self.db.add_tickets(user_id, user_name, tickets_awarded)
                 await channel.send(f"{msg} +{'📜' * tickets_awarded}")
 
                 return
@@ -73,7 +71,7 @@ class BeerChallengeGame(BaseGame):
                 return
 
             await self.api.timeout_user(
-                user_id=target_id, channel_name=channel_name, duration=60, reason="Испытание пивом"
+                user_id=user_id, channel_name=channel_name, duration=60, reason="Испытание пивом"
             )
 
         except Exception as e:
