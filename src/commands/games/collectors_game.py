@@ -72,10 +72,10 @@ class CollectorsGame(BaseGame):
             if is_privileged(message.author):
                 return
 
-            if not self.cache_manager.can_user_participate(message.author.id):
+            if not await self.cache_manager.can_user_participate(message.author.id):
                 return
 
-            self.cache_manager.update_user_cooldown(message.author.id)
+            await self.cache_manager.update_user_cooldown(message.author.id)
             collector = self.collectors[collector_type]
 
             if collector.should_reset() and collector.participants:

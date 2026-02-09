@@ -1,13 +1,14 @@
 import configparser
 import pathlib
+from datetime import time as dtime
 from typing import Any
 
 
 def load_settings(config_path: str | None = None) -> dict[str, Any]:
     """
-    Load bot configuration settings from INI file.
+    Load bot configuration settings from the INI file.
 
-    Creates default configuration file if it doesn't exist and returns
+    Creates a default configuration file if it doesn't exist and returns
     parsed settings with appropriate data types.
 
     Args:
@@ -53,6 +54,7 @@ def load_settings(config_path: str | None = None) -> dict[str, Any]:
             config.write(configfile)
 
     config.read(final_config_path)
+    schedule_enabled = config.getboolean("SCHEDULE", "enabled", fallback=False)
 
     settings = {
         "command_delay_time": int(config.get("SETTINGS", "command_delay_time", fallback=45)),
@@ -69,6 +71,19 @@ def load_settings(config_path: str | None = None) -> dict[str, Any]:
         "privileged": [
             user.strip().lower() for user in config.get("ADMINS", "privileged", fallback="").split(",") if user.strip()
         ],
+        "schedule": {
+            "enabled": schedule_enabled,
+            "timezone": config.get("SCHEDULE", "timezone", fallback="Europe/Moscow"),
+            "offline_from": _parse_time(config.get("SCHEDULE", "offline_from", fallback=None)),
+            "offline_to": _parse_time(config.get("SCHEDULE", "offline_to", fallback=None)),
+        },
     }
 
     return settings
+
+
+def _parse_time(value: str | None) -> dtime | None:
+    if not value:
+        return None
+    hour, minute = map(int, value.split(":"))
+    return dtime(hour, minute)

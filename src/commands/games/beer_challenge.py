@@ -3,17 +3,20 @@ import random
 from twitchio.ext.commands import Context
 
 from src.commands.games.base_game import BaseGame
-from src.commands.models.chatters import ChatterData
+from src.commands.permissions import is_privileged
 
 
 class BeerChallengeGame(BaseGame):
     """Handles the Beer Challenge reward without requiring a chat context."""
 
-    async def handle_beer_challenge_command(self, user_name: str, user_input: str, channel_name: str) -> None:
+    async def handle_beer_challenge_command(
+        self, user_id: str, user_name: str, user_input: str, channel_name: str
+    ) -> None:
         """
         Handle the Beer Challenge reward command for any user.
 
         Args:
+            user_id (str): The id of the user.
             user_name: The username of the user.
             user_input: The user input (expected to be a number).
             channel_name: The channel name where the reward was redeemed.
@@ -31,17 +34,12 @@ class BeerChallengeGame(BaseGame):
                 self.logger.error(f"Invalid input: {user_input}")
                 return
 
-            user_obj = ChatterData(id="", name=user_name, display_name=user_name)
             amount = max(1, min(int(cleaned), 20))
             success_chance = self.get_success_chance(amount)
             roll = random.randint(1, 100)
 
             success = roll <= success_chance
-
             if success:
-                target_id = await self.user_manager.get_user_id(user_name)
-                if not target_id:
-                    return
 
                 if amount <= 5:
                     msg = f"@{user_name}, разминочная Beerge"
@@ -56,7 +54,7 @@ class BeerChallengeGame(BaseGame):
                     msg = f"@{user_name} - не человек, зверь нахуй NixyiaSobi"
                     tickets_awarded = 5
 
-                await self.db.add_tickets(target_id, user_name, tickets_awarded)
+                await self.db.add_tickets(user_id, user_name, tickets_awarded)
                 await channel.send(f"{msg} +{'📜' * tickets_awarded}")
 
                 return
@@ -70,18 +68,17 @@ class BeerChallengeGame(BaseGame):
             msg = random.choice(fail_msgs)
             await channel.send(msg)
 
-            if not self.cache_manager.filter_chatters([user_obj]):
-                self.logger.warning(f"Privileged user? {user_obj["name"]}")
+            if is_privileged(user_name):
+                self.logger.warning(f"Privileged user? {user_name}")
                 return
 
-            target_id = await self.user_manager.get_user_id(user_name)
-            if target_id:
-                await self.api.timeout_user(
-                    user_id=target_id, channel_name=channel_name, duration=60, reason="Испытание пивом — провал"
-                )
+            await self.api.timeout_user(
+                user_id=user_id, channel_name=channel_name, duration=60, reason="Испытание пивом"
+            )
 
         except Exception as e:
             self.logger.error(f"Error in Beer Challenge command: {e}")
+            return
 
     @staticmethod
     def get_success_chance(amount: int) -> int:

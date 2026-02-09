@@ -1,12 +1,13 @@
+import datetime
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from .models import Base, PlayerStats
+from .models import Base, PlayerStats, ScheduledOffline
 
 logger = logging.getLogger(__name__)
 
@@ -148,33 +149,6 @@ class Database:
             logger.error(f"Get top players error: {e}")
             return []
 
-    async def get_player_rank(self, twitch_id: str) -> int | None:
-        """
-        Get player's rank position based on wins.
-
-        Args:
-            twitch_id: Player's Twitch ID
-
-        Returns:
-            Player's rank position or None if not found
-        """
-        try:
-            async with self.session_scope() as session:
-                stmt = (
-                    select(func.dense_rank().over(order_by=desc(PlayerStats.wins)).label("position"))
-                    .where(PlayerStats.twitch_id == twitch_id)
-                    .where(PlayerStats.wins.is_not(None))
-                    .limit(1)
-                )
-                result = await session.execute(stmt)
-                rank = result.scalar()
-
-                return rank if rank else None
-
-        except SQLAlchemyError as e:
-            logger.error(f"Get player rank error: {e}")
-            return None
-
     async def add_tickets(self, twitch_id: str, username: str, amount: int) -> int:
         """
         Add tickets to a player, creating a record if needed.
@@ -193,11 +167,7 @@ class Database:
                 player = result.scalars().first()
 
                 if not player:
-                    player = PlayerStats(
-                        twitch_id=twitch_id,
-                        username=username,
-                        tickets=amount
-                    )
+                    player = PlayerStats(twitch_id=twitch_id, username=username, tickets=amount)
                     session.add(player)
                 else:
                     player.tickets += amount
@@ -222,19 +192,60 @@ class Database:
         """
         try:
             async with self.session_scope() as session:
-                result = await session.execute(
-                    select(PlayerStats).where(PlayerStats.twitch_id == twitch_id)
-                )
+                result = await session.execute(select(PlayerStats).where(PlayerStats.twitch_id == twitch_id))
                 player = result.scalars().first()
 
                 if not player:
                     return 0
 
-                player.tickets = max(player.tickets - amount, 0)
+                current_tickets = player.tickets
+                new_tickets = max(current_tickets - amount, 0)
+                player.tickets = new_tickets
 
                 await session.flush()
-                return player.tickets
+                return new_tickets
 
         except SQLAlchemyError as e:
             logger.error(f"Remove tickets error: {e}", exc_info=True)
             return 0
+
+    async def get_scheduled_offline(self, date: datetime.date) -> ScheduledOffline | None:
+        """
+        Retrieve the scheduled offline record for a specific date.
+
+        Args:
+            date: The date for which to fetch the scheduled offline record.
+
+        Returns:
+            The ScheduledOffline object if found, otherwise None.
+        """
+        try:
+            async with self.session_scope() as session:
+                result = await session.execute(select(ScheduledOffline).where(ScheduledOffline.date == date))
+                return result.scalars().first()
+        except SQLAlchemyError as e:
+            logger.error(f"Get scheduled offline error: {e}", exc_info=True)
+            return None
+
+    async def set_scheduled_offline(self, date: datetime.date, sent_message: bool = True) -> None:
+        """
+        Create or update the scheduled offline record for a given date.
+
+        Args:
+            date: The date for which to set the scheduled offline record.
+            sent_message: Whether the offline message has been sent (default True).
+
+        Returns:
+            None
+        """
+        try:
+            async with self.session_scope() as session:
+                record = await self.get_scheduled_offline(date)
+                if not record:
+                    record = ScheduledOffline(date=date, sent_message=sent_message)
+                    session.add(record)
+                else:
+                    record.sent_message = sent_message
+                await session.flush()
+        except SQLAlchemyError as e:
+            logger.error(f"Set scheduled offline error: {e}", exc_info=True)

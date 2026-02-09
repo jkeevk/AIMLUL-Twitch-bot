@@ -1,4 +1,5 @@
 import logging
+from json import JSONDecodeError
 from typing import Any, cast
 
 import aiohttp
@@ -12,6 +13,8 @@ class TwitchAPI:
     Manages API sessions, authentication headers, and provides methods
     for common Twitch API operations, such as user timeouts.
     """
+
+    BROADCASTER_TTL = 86400
 
     def __init__(self, bot: Any) -> None:
         """
@@ -83,7 +86,7 @@ class TwitchAPI:
         Args:
             method: HTTP method ('get', 'post', etc.)
             url: Full URL
-            kwargs: aiohttp request parameters (headers, params, json, etc.)
+            kwargs: aiohttp request parameters (headers, params, JSON, etc.)
 
         Returns:
             Tuple of (status_code, json_data)
@@ -94,10 +97,10 @@ class TwitchAPI:
         async def do_request() -> tuple[int, dict[str, Any]]:
             async with session.request(method, url, **kwargs) as resp:
                 try:
-                    data: dict[str, Any] = await resp.json()
-                except Exception:
-                    data = {}
-                return resp.status, data
+                    resp_data: dict[str, Any] = await resp.json()
+                except JSONDecodeError:
+                    resp_data = {}
+                return resp.status, resp_data
 
         status, data = await do_request()
 
@@ -112,7 +115,7 @@ class TwitchAPI:
 
     async def get_chatters(self, channel_name: str, broadcaster_id: str | None = None) -> list[dict[str, str]]:
         """
-        Get list of chatters using Twitch Helix API.
+        Get the list of chatters using Twitch Helix API.
 
         Args:
             channel_name: The name of the channel to get chatters for.
@@ -123,7 +126,7 @@ class TwitchAPI:
         """
         await self._ensure_session()
         if not broadcaster_id:
-            broadcaster_id = await self._get_user_id(channel_name)
+            broadcaster_id = await self.get_broadcaster_id(channel_name)
 
         if not broadcaster_id:
             self.logger.warning(f"Broadcaster not found: {channel_name}")
@@ -141,9 +144,38 @@ class TwitchAPI:
         raw_chatters = data.get("data", [])
         return [{"user_name": c["user_name"], "user_id": c["user_id"]} for c in raw_chatters]
 
-    async def timeout_user(self, user_id: str, channel_name: str, duration: int, reason: str) -> tuple[int, Any]:
+    async def get_broadcaster_id(self, channel_name: str) -> str | None:
         """
-        Issue timeout to a user in specified channel.
+        Retrieve broadcaster ID from Redis cache.
+
+        If not found in cache, fetch from Twitch API and store in Redis.
+
+        Args:
+            channel_name: Name of the Twitch channel
+
+        Returns:
+            Broadcaster ID as a string, or None if not found
+        """
+        cached_id = await self.bot.cache_manager.redis.get(f"bot:broadcaster_id:{channel_name.lower()}")
+        if cached_id:
+            return str(cached_id)
+
+        user_id = await self._get_user_id(channel_name)
+        if user_id:
+            await self.bot.cache_manager.redis.setex(
+                f"bot:broadcaster_id:{channel_name.lower()}", self.BROADCASTER_TTL, user_id
+            )
+        return user_id
+
+    async def timeout_user(
+        self,
+        user_id: str,
+        channel_name: str,
+        duration: int,
+        reason: str,
+    ) -> tuple[int, Any]:
+        """
+        Issue timeout to a user in the specified channel.
 
         Args:
             user_id: Target user ID
@@ -155,7 +187,9 @@ class TwitchAPI:
             Tuple of (status_code, response_data)
         """
         await self._ensure_session()
-        broadcaster_id = await self._get_user_id(channel_name)
+
+        broadcaster_id = await self.get_broadcaster_id(channel_name)
+
         if not broadcaster_id:
             return 0, "Broadcaster not found"
 

@@ -7,8 +7,6 @@ from src.commands.games.beer_challenge import BeerChallengeGame
 from src.commands.games.collectors_game import CollectorsGame
 from src.commands.games.simple_commands import SimpleCommandsGame
 from src.commands.games.twenty_one import TwentyOneGame
-from src.commands.managers.cache_manager import CacheManager
-from src.commands.managers.user_manager import UserManager
 
 
 class CommandHandler:
@@ -30,16 +28,13 @@ class CommandHandler:
         self.api = bot.api
         self.db = bot.db
         self.logger = logging.getLogger(__name__)
-
-        self.cache_manager = CacheManager()
-        self.user_manager = UserManager(bot, self.cache_manager)
-
+        self.cache_manager = bot.cache_manager
         self.collectors_game = CollectorsGame(self)
         self.twenty_one_game = TwentyOneGame(self)
         self.simple_commands_game = SimpleCommandsGame(self)
         self.beer_barrel_game = BeerBarrelGame(self)
         self.beer_challenge_game = BeerChallengeGame(self)
-        self.voteban_state = {
+        self.voteban_state: dict[str, Any] = {
             "target": None,
             "votes": set(),
             "start_time": 0.0,
@@ -85,9 +80,9 @@ class CommandHandler:
         """Handle beer barrel command."""
         await self.beer_barrel_game.handle_beer_barrel_command(user_name, channel_name)
 
-    async def handle_beer_challenge(self, user_name: str, user_input: str, channel_name: str) -> None:
+    async def handle_beer_challenge(self, user_id: str, user_name: str, user_input: str, channel_name: str) -> None:
         """Handle beer challenge command."""
-        await self.beer_challenge_game.handle_beer_challenge_command(user_name, user_input, channel_name)
+        await self.beer_challenge_game.handle_beer_challenge_command(user_id, user_name, user_input, channel_name)
 
     async def handle_twenty_one(self, ctx: Any) -> None:
         """Handle twenty-one game command."""

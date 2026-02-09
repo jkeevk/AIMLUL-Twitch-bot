@@ -1,14 +1,16 @@
 import logging
 import os
+import time
 from contextlib import suppress
 from typing import Any
-import time
 
+from redis.asyncio import Redis
 from twitchio import Message
 from twitchio.ext import commands
 
 from src.api.twitch_api import TwitchAPI
 from src.commands.command_handler import CommandHandler
+from src.commands.managers.cache_manager import CacheManager
 from src.commands.permissions import is_admin
 from src.commands.triggers.text_triggers import build_triggers
 from src.core.config_loader import load_settings
@@ -31,18 +33,26 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
     command_handler: CommandHandler
     eventsub: EventSubManager
     triggers: dict[str, Any]
+    scheduled_offline: bool
+    manual_override: bool
+    is_connected: bool
 
-    def __init__(self, token_manager: TokenManager, bot_token: str) -> None:
+    def __init__(self, token_manager: TokenManager, bot_token: str, redis: Redis) -> None:
         """
         Initialize the Twitch bot.
 
         Args:
             token_manager: Manager for handling token refresh operations
             bot_token: Bot authentication token
+            redis: Redis connection
         """
         self.config = load_settings()
         self.token_manager = token_manager
         self.active = True
+        self.scheduled_offline = False
+        self.manual_override = False
+        self.is_connected = False
+        self.redis = redis
 
         super().__init__(
             token=bot_token,
@@ -56,12 +66,10 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
 
         dsn: str | None = os.getenv("DATABASE_URL") or self.config["database"].get("dsn")
         self.db = Database(dsn) if dsn else None
-
+        self.cache_manager = CacheManager(self.redis)
         self.command_handler = CommandHandler(self)
         self.eventsub = EventSubManager(self)
         self.triggers = build_triggers(self)
-        self.token_refresh_task = None
-        self.is_connected: bool = False
 
     async def event_token_expired(self) -> str | None:
         """
@@ -92,6 +100,13 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
 
         await self.eventsub.setup()
 
+        if self.redis:
+            try:
+                await self.redis.ping()
+                logger.info("Redis OK")
+            except Exception as e:
+                logger.error("Redis ping failed", exc_info=e)
+
     async def event_message(self, message: Message) -> None:
         """
         Handle incoming chat messages.
@@ -100,6 +115,9 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
             message: The incoming message object
         """
         if message.echo:
+            return
+
+        if not self.active and not (message.author and is_admin(self, message.author.name)):
             return
 
         text = message.content.lower()
@@ -124,6 +142,8 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
         Args:
             event: The EventSub reward redemption event
         """
+        if not self.active:
+            return
         await handle_eventsub_reward(event, self)
 
     @commands.command(name="жопа")
@@ -140,7 +160,7 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
 
     @commands.command(name="я")
     async def me(self, ctx: commands.Context) -> None:
-        """Handle the me command to show user stats."""
+        """Handle the "me" command to show user stats."""
         if self.active:
             await self.command_handler.handle_me(ctx)
 
@@ -184,6 +204,8 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
         if not is_admin(self, ctx.author.name):
             return
         self.active = False
+        self.manual_override = False
+        self.scheduled_offline = False
         await ctx.send("banka Алибидерчи! Бот выключен.")
 
     @commands.command(name="ботговори")
@@ -191,6 +213,8 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
         """Activate the bot (admin only)."""
         if not is_admin(self, ctx.author.name):
             return
+        self.manual_override = True
+        self.scheduled_offline = False
         self.active = True
         await ctx.send("deshovka Бот снова активен!")
 

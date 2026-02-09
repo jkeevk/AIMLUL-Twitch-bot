@@ -37,6 +37,9 @@ dependencies = [
     "jinja2>=3.1.6",
     "types-paramiko>=4.0.0.20250822",
     "certifi==2025.11.12",
+    "asyncssh>=2.21.1",
+    "fastapi>=0.123.9",
+    "redis>=7.1.0",
 ]
 
 
