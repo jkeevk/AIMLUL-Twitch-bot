@@ -31,7 +31,7 @@ async def beer_challenge_handler(event: Any, bot: Any) -> None:
         event: EventSub reward event object.
         bot: TwitchBot instance.
     """
-    user_id = event.data.user.id
+    user_id = str(event.data.user.id)
     user_name = event.data.user.name
     channel_name = event.data.broadcaster.name.lower()
     user_input = event.data.input

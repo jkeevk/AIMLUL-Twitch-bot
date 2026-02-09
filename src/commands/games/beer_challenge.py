@@ -9,7 +9,9 @@ from src.commands.permissions import is_privileged
 class BeerChallengeGame(BaseGame):
     """Handles the Beer Challenge reward without requiring a chat context."""
 
-    async def handle_beer_challenge_command(self, user_id: str, user_name: str, user_input: str, channel_name: str) -> None:
+    async def handle_beer_challenge_command(
+        self, user_id: str, user_name: str, user_input: str, channel_name: str
+    ) -> None:
         """
         Handle the Beer Challenge reward command for any user.
 
@@ -76,6 +78,7 @@ class BeerChallengeGame(BaseGame):
 
         except Exception as e:
             self.logger.error(f"Error in Beer Challenge command: {e}")
+            return
 
     @staticmethod
     def get_success_chance(amount: int) -> int:
