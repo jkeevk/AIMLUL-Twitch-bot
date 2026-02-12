@@ -14,7 +14,7 @@ USER_CD_KEY = "bot:user_cd:{}"
 CMD_CD_KEY = "bot:cmd_cd:{}"
 CHATTERS_KEY = "bot:chatters:{}"
 ACTIVE_CHATTERS_KEY = "bot:active_chatters:{}"
-ACTIVE_TTL = 1800
+ACTIVE_TTL = 900
 
 
 class CacheManager:
@@ -165,10 +165,11 @@ class CacheManager:
         key = ACTIVE_CHATTERS_KEY.format(channel_name.lower())
         now = int(time.time())
         value = f"{username.lower()}:{user_id}"
+        cutoff = now - ACTIVE_TTL
 
         try:
+            await self.redis.zremrangebyscore(key, 0, cutoff)
             await self.redis.zadd(key, {value: now})
-            await self.redis.expire(key, ACTIVE_TTL)
         except Exception as e:
             self.logger.warning(f"Failed to mark user active: {e}")
 
@@ -190,9 +191,7 @@ class CacheManager:
         cutoff = now - ACTIVE_TTL
 
         try:
-            await self.redis.zremrangebyscore(key, 0, cutoff)
-
-            raw_users = await self.redis.zrange(key, 0, -1)
+            raw_users = await self.redis.zrangebyscore(key, cutoff, now)
             users = []
             for u in raw_users:
                 if isinstance(u, bytes):
