@@ -468,6 +468,7 @@ class BotManager:
                 if not getattr(bot, "scheduled_offline", False):
                     bot.active = False
                     bot.scheduled_offline = True
+                    logger.info(f"[{now_dt}] Bot is going offline (sleep time: {off_time} - {on_time})")
 
                 if not message_already_sent:
                     for channel in getattr(bot, "connected_channels", []):
@@ -486,6 +487,7 @@ class BotManager:
                         bot.active = True
                         for channel in getattr(bot, "connected_channels", []):
                             await channel.send("peepoArrive работаем")
+                        logger.info(f"[{now_dt}] Bot is back online (wake-up time: {on_time})")
 
                     if getattr(bot, "db", None):
                         await bot.db.set_scheduled_offline(today, sent_message=False)
