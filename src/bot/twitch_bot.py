@@ -88,7 +88,6 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
 
     async def event_ready(self) -> None:
         """Called when the bot is ready and connected to Twitch."""
-        logger.info("Bot ready")
         self.is_connected = True
 
         if self.db:
@@ -106,6 +105,7 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
                 logger.info("Redis OK")
             except Exception as e:
                 logger.error("Redis ping failed", exc_info=e)
+        logger.info("Bot ready")
 
     async def event_message(self, message: Message) -> None:
         """
@@ -116,7 +116,12 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
         """
         if message.echo:
             return
-
+        if message.author:
+            await self.cache_manager.mark_user_active(
+                message.channel.name,
+                message.author.name,
+                message.author.id,
+            )
         if not self.active and not (message.author and is_admin(self, message.author.name)):
             return
 
@@ -145,6 +150,11 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
         if not self.active:
             return
         await handle_eventsub_reward(event, self)
+
+    async def event_disconnect(self) -> None:
+        """Called when the bot disconnects from Twitch."""
+        logger.warning("Bot disconnected from Twitch")
+        self.is_connected = False
 
     @commands.command(name="жопа")
     async def butt(self, ctx: commands.Context) -> None:

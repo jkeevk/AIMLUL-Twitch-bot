@@ -1,5 +1,5 @@
-import os
 import logging
+import os
 
 import redis.asyncio as redis
 
@@ -30,4 +30,3 @@ def create_redis() -> redis.Redis:
 
     logger.info("Redis client initialized")
     return client
-

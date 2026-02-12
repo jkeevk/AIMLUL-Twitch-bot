@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import time
 from dataclasses import asdict
 from typing import Any
 
@@ -12,6 +13,9 @@ from src.commands.models.chatters import ChatterData
 USER_CD_KEY = "bot:user_cd:{}"
 CMD_CD_KEY = "bot:cmd_cd:{}"
 CHATTERS_KEY = "bot:chatters:{}"
+ACTIVE_CHATTERS_KEY = "bot:active_chatters:{}"
+ACTIVE_TTL = 1800
+
 
 class CacheManager:
     """
@@ -87,9 +91,7 @@ class CacheManager:
             True if the command is available, False if on cooldown.
         """
         try:
-            exists: int = await self.redis.exists(
-                CMD_CD_KEY.format(command.lower())
-            )
+            exists: int = await self.redis.exists(CMD_CD_KEY.format(command.lower()))
             return exists == 0
         except Exception as e:
             self.logger.warning(f"Failed to check cooldown for command '{command}': {e}")
@@ -147,6 +149,61 @@ class CacheManager:
             await self.redis.setex(key, ttl, json.dumps([asdict(c) for c in chatters]))
         except Exception as e:
             self.logger.warning(f"Failed to update chatter cache for channel '{channel_name}': {e}")
+
+    async def mark_user_active(self, channel_name: str, username: str, user_id: str) -> None:
+        """
+        Mark a user as active in a channel, storing both username and Twitch user ID.
+
+        Args:
+            channel_name: Name of the Twitch channel.
+            username: Twitch username to mark as active.
+            user_id: Twitch user ID to store for faster future lookups.
+
+        Returns:
+            None
+        """
+        key = ACTIVE_CHATTERS_KEY.format(channel_name.lower())
+        now = int(time.time())
+        value = f"{username.lower()}:{user_id}"
+
+        try:
+            await self.redis.zadd(key, {value: now})
+            await self.redis.expire(key, ACTIVE_TTL)
+        except Exception as e:
+            self.logger.warning(f"Failed to mark user active: {e}")
+
+    async def get_active_chatters(self, channel_name: str) -> list[dict[str, str]]:
+        """
+        Retrieve a list of currently active chatters with both username and ID.
+
+        Returns a list of dictionaries: [{"name": str, "id": str}, ...].
+        Removes users who have not been active within the TTL window.
+
+        Args:
+            channel_name: Name of the Twitch channel.
+
+        Returns:
+            List of active users with their IDs.
+        """
+        key = ACTIVE_CHATTERS_KEY.format(channel_name.lower())
+        now = int(time.time())
+        cutoff = now - ACTIVE_TTL
+
+        try:
+            await self.redis.zremrangebyscore(key, 0, cutoff)
+
+            raw_users = await self.redis.zrange(key, 0, -1)
+            users = []
+            for u in raw_users:
+                if isinstance(u, bytes):
+                    u = u.decode()
+                if ":" in u:
+                    name, user_id = u.split(":", 1)
+                    users.append({"name": name, "id": user_id})
+            return users
+        except Exception as e:
+            self.logger.warning(f"Failed to get active chatters: {e}")
+            return []
 
     async def get_user_id(self, username: str, channel_name: str, api: TwitchAPI) -> str | None:
         """
