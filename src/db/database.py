@@ -66,15 +66,20 @@ class Database:
 
     async def update_stats(self, twitch_id: str, username: str, win: bool) -> tuple[int, int]:
         """
-        Update player statistics with win/loss.
+        Update player's win/loss statistics.
+
+        If the player does not exist, a new record is created.
 
         Args:
-            twitch_id: Player's Twitch ID
-            username: Player's username
-            win: True if player won, False if lost
+            twitch_id (str): Twitch ID of the player.
+            username (str): Username of the player.
+            win (bool): True if the player won, False if lost.
 
         Returns:
-            Tuple of (wins, losses) count for the player
+            tuple[int, int]: Updated (wins, losses) for the player.
+
+        Notes:
+            Returns (0, 0) if a database error occurs.
         """
         try:
             async with self.session_scope() as session:
@@ -106,13 +111,14 @@ class Database:
 
     async def get_stats(self, twitch_id: str) -> tuple[int, int]:
         """
-        Retrieve player statistics.
+        Retrieve the win/loss statistics for a player.
 
         Args:
-            twitch_id: Player's Twitch ID
+            twitch_id (str): The Twitch ID of the player.
 
         Returns:
-            Tuple of (wins, losses) for the player
+            tuple[int, int]: A tuple (wins, losses) representing the player's statistics.
+                             Returns (0, 0) if the player is not found or if an error occurs.
         """
         try:
             async with self.session_scope() as session:
@@ -129,13 +135,14 @@ class Database:
 
     async def get_top_players(self, limit: int = 3) -> list[tuple[str, int, int]]:
         """
-        Retrieve top players by win count.
+        Retrieve a list of the top players by number of wins.
 
         Args:
-            limit: Number of top players to return
+            limit (int): The maximum number of top players to return. Default to 3 if not specified.
 
         Returns:
-            List of tuples containing (username, wins, losses) for each player
+            list[tuple[str, int, int]]: A list of tuples, each containing (username, wins, losses)
+                                        for a top player. Returns an empty list if an error occurs.
         """
         try:
             async with self.session_scope() as session:
@@ -151,15 +158,15 @@ class Database:
 
     async def add_tickets(self, twitch_id: str, username: str, amount: int) -> int:
         """
-        Add tickets to a player, creating a record if needed.
+        Add tickets to a player. Creates a new player record if none exists.
 
         Args:
-            twitch_id: Twitch ID of the player
-            username: Username of the player
-            amount: Number of tickets to add
+            twitch_id (str): Twitch ID of the player.
+            username (str): Player's username.
+            amount (int): Number of tickets to add.
 
         Returns:
-            Total tickets after addition
+            int: Total tickets after addition. Returns 0 on error.
         """
         try:
             async with self.session_scope() as session:
@@ -181,14 +188,14 @@ class Database:
 
     async def remove_tickets(self, twitch_id: str, amount: int) -> int:
         """
-        Remove tickets from a player. Tickets will not go below zero.
+        Remove tickets from a player. The ticket count will not go below zero.
 
         Args:
-            twitch_id: Twitch ID of the player
-            amount: Number of tickets to remove
+            twitch_id (str): Twitch ID of the player.
+            amount (int): Number of tickets to remove.
 
         Returns:
-            Total tickets after removal (0 if player not found or error)
+            int: Total tickets after removal. Returns 0 if player not found or on error.
         """
         try:
             async with self.session_scope() as session:
@@ -211,13 +218,13 @@ class Database:
 
     async def get_scheduled_offline(self, date: datetime.date) -> ScheduledOffline | None:
         """
-        Retrieve the scheduled offline record for a specific date.
+        Get the scheduled offline record for a specific date.
 
         Args:
-            date: The date for which to fetch the scheduled offline record.
+            date (datetime.date): The date to fetch the offline record for.
 
         Returns:
-            The ScheduledOffline object if found, otherwise None.
+            ScheduledOffline | None: The scheduled offline record if exists, else None.
         """
         try:
             async with self.session_scope() as session:
@@ -229,14 +236,11 @@ class Database:
 
     async def set_scheduled_offline(self, date: datetime.date, sent_message: bool = True) -> None:
         """
-        Create or update the scheduled offline record for a given date.
+        Create or update a scheduled offline record.
 
         Args:
-            date: The date for which to set the scheduled offline record.
-            sent_message: Whether the offline message has been sent (default True).
-
-        Returns:
-            None
+            date (datetime.date): Date of the scheduled offline.
+            sent_message (bool): Whether the offline message has been sent. Defaults to True.
         """
         try:
             async with self.session_scope() as session:
