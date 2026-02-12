@@ -152,7 +152,10 @@ class CacheManager:
 
     async def mark_user_active(self, channel_name: str, username: str, user_id: str) -> None:
         """
-        Mark a user as active in a channel, storing both username and Twitch user ID.
+        Mark a user as active in a channel.
+
+        Updates the user's last active timestamp and removes users
+        who have not been active within the ACTIVE_TTL window.
 
         Args:
             channel_name: Name of the Twitch channel.
@@ -175,16 +178,16 @@ class CacheManager:
 
     async def get_active_chatters(self, channel_name: str) -> list[dict[str, str]]:
         """
-        Retrieve a list of currently active chatters with both username and ID.
+        Get a list of currently active chatters in a channel.
 
-        Returns a list of dictionaries: [{"name": str, "id": str}, ...].
-        Removes users who have not been active within the TTL window.
+        Only users who have been active within the last ACTIVE_TTL seconds
+        are returned. Each user is represented as a dict with 'name' and 'id'.
 
         Args:
             channel_name: Name of the Twitch channel.
 
         Returns:
-            List of active users with their IDs.
+            List of dicts for active users, e.g., [{"name": str, "id": str}, ...].
         """
         key = ACTIVE_CHATTERS_KEY.format(channel_name.lower())
         now = int(time.time())
