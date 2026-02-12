@@ -1,4 +1,3 @@
-import asyncio
 import random
 import time
 from typing import Any
@@ -21,8 +20,9 @@ class SimpleCommandsGame(BaseGame):
         """
         Handle the club command for moderators.
 
-        Args:
-            ctx: Command context object
+        Chooses a random active chatter and applies a 15s timeout,
+        unless the target is privileged. If the author hits themselves,
+        a special message is sent instead.
         """
         try:
             if not is_privileged(ctx.author):
@@ -32,36 +32,58 @@ class SimpleCommandsGame(BaseGame):
             if not await self.check_cooldown("club"):
                 return
 
-            cached_chatters = await self.cache_manager.get_or_update_chatters(ctx.channel.name, self.api)
-            if not cached_chatters:
-                self.logger.warning("No suitable users found for club command")
+            channel = ctx.channel.name
+            author_name = ctx.author.name
+            author_lower = author_name.lower()
+
+            active_users = await self.cache_manager.get_active_chatters(channel)
+
+            if active_users:
+                target = random.choice(active_users)
+                target_name = target["name"]
+                target_id = target.get("id")
+            else:
+                cached_chatters = await self.cache_manager.get_or_update_chatters(
+                    channel,
+                    self.api,
+                )
+                if not cached_chatters:
+                    return
+
+                target = random.choice(cached_chatters)
+                target_name = target.name
+                target_id = target.id
+
+            if target_name.lower() == author_lower:
+                await ctx.send(f"{author_name} бьёт дрыном по голове сам себя GAGAGA Вот же фрик чвч")
+                await self.update_cooldown("club")
                 return
 
-            target_chatter = random.choice(cached_chatters)
-            target_name = target_chatter.name
-            target_id = await self.cache_manager.get_user_id(target_name, ctx.channel.name, self.api)
-
-            if not target_id:
-                self.logger.error(f"Failed to get user ID: {target_name}")
-                return
-
-            await ctx.send(f"{ctx.author.name} бьёт дрыном по голове {target_name} MODS")
+            await ctx.send(f"{author_name} бьёт дрыном по голове {target_name} MODS")
             await self.update_cooldown("club")
 
-            if not is_privileged(target_chatter):
-                timeout_task = asyncio.create_task(
-                    self.api.timeout_user(
-                        user_id=target_id,
-                        channel_name=ctx.channel.name,
-                        duration=15,
-                        reason="дрын",
-                    )
-                )
-                status, response = await timeout_task
-                if status == 200:
-                    self.logger.info(f"Club applied to {target_name}")
-                else:
-                    self.logger.warning(f"Timeout failed: {status}")
+            if is_privileged(target_name):
+                self.logger.info(f"Skipping timeout for privileged user: {target_name}")
+                return
+
+            if not target_id:
+                target_id = await self.cache_manager.get_user_id(target_name, channel, self.api)
+
+            if not target_id:
+                self.logger.warning(f"No target id found for {target_name}")
+                return
+
+            status, _ = await self.api.timeout_user(
+                user_id=target_id,
+                channel_name=channel,
+                duration=15,
+                reason="дрын",
+            )
+
+            if status == 200:
+                self.logger.info(f"Club applied to {target_name}")
+            else:
+                self.logger.warning(f"Timeout failed: {status}")
 
         except Exception as e:
             self.logger.error(f"Club command error: {e}")
