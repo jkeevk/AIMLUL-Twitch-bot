@@ -146,6 +146,7 @@ async def test_beer_challenge_whitespace_input():
     assert args[2] == "   "  # user_input (whitespace)
     assert args[3] == "testbroadcaster"  # channel_name
 
+
 @pytest.mark.asyncio
 async def test_beer_challenge_mixed_input():
     """Test that Beer Challenge reward with mixed text and numbers returns error message."""
@@ -217,7 +218,9 @@ async def test_beer_challenge_game_non_numeric_logic():
     non_numeric_input = "не число"
 
     # Call the actual method
-    await command_handler.beer_challenge_game.handle_beer_challenge_command(user_id, user_name, non_numeric_input, channel_name)
+    await command_handler.beer_challenge_game.handle_beer_challenge_command(
+        user_id, user_name, non_numeric_input, channel_name
+    )
 
     # Verify that "send" was called with the error message
     mock_channel.send.assert_awaited_once()
@@ -269,7 +272,9 @@ async def test_beer_challenge_game_logic_with_mocks():
     command_handler.beer_challenge_game.logger = MagicMock()
 
     # Now test the actual logic
-    await command_handler.beer_challenge_game.handle_beer_challenge_command("123", "TestUser", "не число", "testchannel")
+    await command_handler.beer_challenge_game.handle_beer_challenge_command(
+        "123", "TestUser", "не число", "testchannel"
+    )
 
     # Verify error message was sent
     mock_channel.send.assert_awaited_once()

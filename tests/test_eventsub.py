@@ -406,7 +406,9 @@ async def test_full_eventsub_flow():
     await beer_challenge_handler(mock_event, mock_bot)
 
     # Step 4: Verify the command was called
-    mock_bot.command_handler.handle_beer_challenge.assert_awaited_once_with("456", "TestUser", "не число", "testbroadcaster")
+    mock_bot.command_handler.handle_beer_challenge.assert_awaited_once_with(
+        "456", "TestUser", "не число", "testbroadcaster"
+    )
 
     # Step 5: Test cleanup
     await manager.close()

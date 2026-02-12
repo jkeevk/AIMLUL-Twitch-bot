@@ -27,7 +27,8 @@ async def test_handle_club_success(simple_commands_game):
     ctx = DummyCtx(author=author, channel=channel)
 
     class RealChatter:
-        def __init__(self, name):
+        def __init__(self, name, user_id="dummy-id"):
+            self.id = user_id
             self.name = name
 
     dummy_chatter = RealChatter("SomeChatter")
