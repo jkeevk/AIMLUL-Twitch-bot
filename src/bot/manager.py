@@ -191,7 +191,8 @@ class BotManager:
 
         if self.bot:
             await self.bot.close()
-
+        if self.redis:
+            await self.redis.aclose()
         logger.info("BotManager stopped")
 
     async def _token_refresh_loop(self) -> None:
@@ -379,26 +380,21 @@ class BotManager:
             return False
 
         try:
-            if hasattr(self.bot, "is_connected"):
-                if not self.bot.is_connected:
+            if not getattr(self.bot, "is_connected", False):
+                logger.debug("Bot is_connected = False")
+                return False
+
+            connection = getattr(self.bot, "_connection", None)
+            if connection and hasattr(connection, "connected"):
+                if not connection.connected:
+                    logger.debug("Connection.connected = False")
                     return False
 
-            try:
-                if hasattr(self.bot, "fetch_users"):
-                    users = await self.bot.fetch_users(names=[self.bot.nick])
-                    if users and len(users) > 0:
-                        return True
-            except Exception:
-                pass
+            if hasattr(self.bot, "connected_channels") and not self.bot.connected_channels:
+                logger.debug("No connected channels — WS likely dead")
+                return False
 
-            if hasattr(self.bot, "_connection") and self.bot._connection:
-                if hasattr(self.bot._connection, "connected") and self.bot._connection.connected:
-                    return True
-
-            if hasattr(self.bot, "connected_channels") and self.bot.connected_channels:
-                return True
-
-            return False
+            return True
 
         except Exception as e:
             logger.warning(f"Error checking websocket: {e}")
@@ -416,7 +412,6 @@ class BotManager:
 
         The offline window can be overridden manually by an admin using commands.
         """
-        from datetime import datetime
         from datetime import time as dtime
         from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 

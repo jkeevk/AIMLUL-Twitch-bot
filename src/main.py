@@ -26,10 +26,8 @@ async def main() -> None:
     except Exception as e:
         logger.exception(f"Bot crashed!: {e}")
     finally:
-        if manager and manager.bot:
-            await manager.bot.close()
-        if manager and manager.redis:
-            await manager.redis.close()
+        if manager:
+            await manager.stop()
 
 
 if __name__ == "__main__":
