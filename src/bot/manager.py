@@ -245,7 +245,7 @@ class BotManager:
         """
         while self._running:
             settings = load_settings()
-            delay = settings.get("refresh_token_delay_time", 7200)
+            delay = settings.get("refresh_token_interval", 7200)
 
             try:
                 await asyncio.sleep(delay)

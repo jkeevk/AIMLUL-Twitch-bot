@@ -199,9 +199,11 @@ def _create_default_config() -> None:
         moderator:manage:banned_users moderator:read:chatters moderator:read:followers",
     }
     config["INITIAL_CHANNELS"] = {"channels": ""}
-    config["SETTINGS"] = {
-        "command_delay_time": "45",
-        "refresh_token_delay_time": "7200",
+    config["COMMANDS"] = {
+        "delay_time": "45",
+    }
+    config["AUTH"] = {
+        "refresh_token_interval": "7200",
     }
 
     with pathlib.Path(CONFIG_PATH).open("w") as configfile:

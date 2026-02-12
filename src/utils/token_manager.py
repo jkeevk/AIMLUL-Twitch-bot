@@ -180,8 +180,8 @@ class TokenManager:
         self.logger.info(f"Access token <{token_display}> expires in {expires_in} seconds")
 
         refresh_in = 7200
-        if self.config.has_section("SETTINGS"):
-            refresh_in = self.config.getint("SETTINGS", "refresh_token_delay_time", fallback=7200)
+        if self.config.has_section("AUTH"):
+            refresh_in = self.config.getint("AUTH", "refresh_token_interval", fallback=7200)
 
         refresh_in += 10
 

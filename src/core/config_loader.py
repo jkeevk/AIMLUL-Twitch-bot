@@ -40,9 +40,11 @@ def load_settings(config_path: str | None = None) -> dict[str, Any]:
     config_path_obj = pathlib.Path(final_config_path)
 
     if not config_path_obj.exists():
-        config["SETTINGS"] = {
-            "command_delay_time": "45",
-            "refresh_token_delay_time": "7200",
+        config["COMMANDS"] = {
+            "delay_time": "45",
+        }
+        config["AUTH"] = {
+            "refresh_token_interval": "7200",
         }
         config["INITIAL_CHANNELS"] = {"channels": ""}
         config["DATABASE"] = {"dsn": "postgresql+asyncpg://bot:botpassword@db/twitch_bot"}
@@ -57,8 +59,8 @@ def load_settings(config_path: str | None = None) -> dict[str, Any]:
     schedule_enabled = config.getboolean("SCHEDULE", "enabled", fallback=False)
 
     settings = {
-        "command_delay_time": int(config.get("SETTINGS", "command_delay_time", fallback=45)),
-        "refresh_token_delay_time": int(config.get("SETTINGS", "refresh_token_delay_time", fallback=7200)),
+        "command_delay_time": int(config.get("COMMANDS", "delay_time", fallback=45)),
+        "refresh_token_interval": int(config.get("AUTH", "refresh_token_interval", fallback=7200)),
         "channels": [
             channel.strip()
             for channel in config.get("INITIAL_CHANNELS", "channels", fallback="").split(",")
