@@ -14,7 +14,21 @@ APPLECAT_KEYWORDS: list[str] = [
 
 
 def build_triggers(bot: Any) -> dict[str, Any]:
-    """Create a dictionary of text triggers for the bot."""
+    """
+    Build a dictionary of text triggers for the bot.
+
+    Each trigger maps keywords to a handler function that processes
+    the corresponding messages.
+
+    Args:
+        bot: The main bot instance with a command_handler.
+
+    Returns:
+        A dictionary containing:
+            - "gnome_keywords": List of keywords for gnome triggers.
+            - "apple_keywords": List of keywords for applecat triggers.
+            - "handlers": Mapping of trigger names to their handler functions.
+    """
     return {
         "gnome_keywords": GNOME_KEYWORDS,
         "apple_keywords": APPLECAT_KEYWORDS,

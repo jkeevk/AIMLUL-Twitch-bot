@@ -83,6 +83,15 @@ def load_settings(config_path: str | None = None) -> dict[str, Any]:
 
 
 def _parse_time(value: str | None) -> dtime | None:
+    """
+    Convert a string in "HH:MM" format to a datetime.time object.
+
+    Args:
+        value: A string representing the time in "HH:MM" format, or None.
+
+    Returns:
+        A datetime.time object if the input string is valid, otherwise None.
+    """
     if not value:
         return None
     hour, minute = map(int, value.split(":"))

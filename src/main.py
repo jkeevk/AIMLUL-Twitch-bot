@@ -14,7 +14,28 @@ logger = logging.getLogger("main")
 
 
 async def main() -> None:
-    """Main entry point for the bot: initializes token manager and starts bot."""
+    """
+    Main entry point for the Twitch bot application.
+
+    This coroutine performs the following steps:
+    1. Initializes the TokenManager with the configuration file (handles bot and streamer tokens).
+    2. Creates an asynchronous Redis client for caching and state persistence.
+    3. Instantiates the BotManager with the token manager and Redis client.
+    4. Starts the BotManager, which in turn:
+       - Launches the TwitchBot instance
+       - Starts background tasks: token refresh, watchdog monitoring, and scheduled activity
+       - Runs an internal health server on port 8081
+    5. Monitors for exceptions, logs critical errors, and ensures proper shutdown.
+    6. Stops the BotManager and all associated background tasks on exit.
+
+    Logging:
+        All events, errors, and token refresh activity are logged using the standard logging module.
+
+    Notes:
+        - On Windows, sets the appropriate asyncio event loop policy.
+        - The bot automatically refreshes tokens before expiration and
+          can restart itself if the Twitch WebSocket becomes unhealthy.
+    """
     manager = None
     try:
         logger.info("Starting bot...")

@@ -19,27 +19,32 @@ ACTIVE_TTL = 900
 
 class CacheManager:
     """
-    Central cache manager for command handlers.
+    Manages caching of Twitch bot data in Redis.
 
-    Handles caching of:
-    - User cooldowns
-    - Command cooldowns
-    - Channel chatters
+    Responsibilities:
+        - User cooldowns
+        - Command cooldowns
+        - Channel chatters and active users
     """
 
     def __init__(self, redis: Redis) -> None:
-        """Initialize the CacheManager with a Redis instance."""
+        """
+        Initialize CacheManager with a Redis client.
+
+        Args:
+            redis: Redis connection for caching bot data
+        """
         self.redis = redis
         self.logger = logging.getLogger(__name__)
         self._lock = asyncio.Lock()
 
     async def update_user_cooldown(self, user_id: str, cooldown: int = 30) -> None:
         """
-        Set a cooldown for a user.
+        Set a cooldown period for a user.
 
         Args:
-            user_id: ID of the user.
-            cooldown: Cooldown duration in seconds.
+            user_id: Twitch user ID
+            cooldown: Duration of cooldown in seconds (default 30)
         """
         try:
             await self.redis.setex(USER_CD_KEY.format(user_id), cooldown, "1")
@@ -48,13 +53,13 @@ class CacheManager:
 
     async def can_user_participate(self, user_id: str) -> bool:
         """
-        Check if a user is allowed to participate (not on cooldown).
+        Check if a user is eligible to participate (not on cooldown).
 
         Args:
-            user_id: ID of the user.
+            user_id: Twitch user ID
 
         Returns:
-            True if the user can participate, False if on cooldown.
+            True if the user can participate, False if they are on cooldown
         """
         try:
             exists: int = await self.redis.exists(USER_CD_KEY.format(user_id))
@@ -65,11 +70,11 @@ class CacheManager:
 
     async def set_command_cooldown(self, command: str, duration: int) -> None:
         """
-        Set a cooldown for a command.
+        Set a cooldown period for a command.
 
         Args:
-            command: Name of the command.
-            duration: Cooldown duration in seconds.
+            command: Name of the command
+            duration: Cooldown duration in seconds
         """
         try:
             await self.redis.setex(
@@ -82,13 +87,13 @@ class CacheManager:
 
     async def is_command_available(self, command: str) -> bool:
         """
-        Check if a command is available (not on cooldown).
+        Check if a command is available to use (not on cooldown).
 
         Args:
-            command: Name of the command.
+            command: Name of the command
 
         Returns:
-            True if the command is available, False if on cooldown.
+            True if the command is available, False if on cooldown
         """
         try:
             exists: int = await self.redis.exists(CMD_CD_KEY.format(command.lower()))
@@ -99,14 +104,14 @@ class CacheManager:
 
     async def get_or_update_chatters(self, channel_name: str, api: TwitchAPI) -> list[ChatterData]:
         """
-        Retrieve cached chatters for a channel, or fetch from API if not cached.
+        Retrieve cached chatters or fetch them from the Twitch API if the cache is empty.
 
         Args:
-            channel_name: Name of the Twitch channel.
-            api: Twitch API client instance.
+                    channel_name: Name of the Twitch channel
+                    api: Twitch API client
 
         Returns:
-            List of ChatterData objects.
+                    List of ChatterData objects representing channel chatters
         """
         cached = await self.get_cached_chatters(channel_name)
         if cached:
@@ -117,13 +122,13 @@ class CacheManager:
 
     async def get_cached_chatters(self, channel_name: str) -> list[ChatterData]:
         """
-        Get chatters from Redis cache.
+        Retrieve chatters from Redis cache for a given channel.
 
         Args:
-            channel_name: Name of the Twitch channel.
+            channel_name: Name of the Twitch channel
 
         Returns:
-            List of ChatterData if cache exists, else empty list.
+            List of ChatterData objects if cache exists, otherwise an empty list
         """
         key = CHATTERS_KEY.format(channel_name.lower())
         val = await self.redis.get(key)
@@ -137,12 +142,12 @@ class CacheManager:
 
     async def update_chatters_cache(self, channel_name: str, chatters: list[ChatterData], ttl: int = 1800) -> None:
         """
-        Update the Redis cache with the list of chatters.
+        Update the Redis cache with the provided list of chatters.
 
         Args:
-            channel_name: Name of the Twitch channel.
-            chatters: List of ChatterData to cache.
-            ttl: Time to live in seconds for the cache (default 300 seconds).
+            channel_name: Name of the Twitch channel
+            chatters: List of ChatterData to cache
+            ttl: Time-to-live for the cache in seconds (default 1800)
         """
         key = CHATTERS_KEY.format(channel_name.lower())
         try:
@@ -152,15 +157,14 @@ class CacheManager:
 
     async def mark_user_active(self, channel_name: str, username: str, user_id: str) -> None:
         """
-        Mark a user as active in a channel.
+        Mark a user as active in a channel and maintain active users sorted set.
 
-        Updates the user's last active timestamp and removes users
-        who have not been active within the ACTIVE_TTL window.
+        Users inactive longer than ACTIVE_TTL seconds are removed.
 
         Args:
-            channel_name: Name of the Twitch channel.
-            username: Twitch username to mark as active.
-            user_id: Twitch user ID to store for faster future lookups.
+            channel_name: Twitch channel name
+            username: Username to mark active
+            user_id: Twitch user ID
 
         Returns:
             None
@@ -178,16 +182,15 @@ class CacheManager:
 
     async def get_active_chatters(self, channel_name: str) -> list[dict[str, str]]:
         """
-        Get a list of currently active chatters in a channel.
+        Retrieve a list of currently active chatters in a channel.
 
-        Only users who have been active within the last ACTIVE_TTL seconds
-        are returned. Each user is represented as a dict with 'name' and 'id'.
+        Only users active within the last ACTIVE_TTL seconds are returned.
 
         Args:
-            channel_name: Name of the Twitch channel.
+            channel_name: Twitch channel name
 
         Returns:
-            List of dicts for active users, e.g., [{"name": str, "id": str}, ...].
+            List of dicts with keys 'name' and 'id' representing active users
         """
         key = ACTIVE_CHATTERS_KEY.format(channel_name.lower())
         now = int(time.time())
@@ -209,15 +212,15 @@ class CacheManager:
 
     async def get_user_id(self, username: str, channel_name: str, api: TwitchAPI) -> str | None:
         """
-        Get a user's Twitch ID using the cached chatters, fallback to API if missing.
+        Retrieve a user's Twitch ID using cached chatters, falling back to the API.
 
         Args:
-            username: Username to look up.
-            channel_name: Twitch channel name.
-            api: Twitch API client.
+            username: Twitch username
+            channel_name: Twitch channel name
+            api: Twitch API client
 
         Returns:
-            User ID as string if found, else None.
+            User ID as a string if found, otherwise None
         """
         username_lower = username.lower()
         channel_lower = channel_name.lower()
@@ -234,14 +237,14 @@ class CacheManager:
 
     async def force_refresh_chatters(self, channel_name: str, api: TwitchAPI) -> list[ChatterData]:
         """
-        Force refresh chatters from API and update cache.
+        Force fetch chatters from Twitch API and update the cache.
 
         Args:
-            channel_name: Name of the Twitch channel.
-            api: Twitch API client instance.
+            channel_name: Twitch channel name
+            api: Twitch API client
 
         Returns:
-            List of ChatterData objects.
+            List of ChatterData objects representing channel chatters
         """
         try:
             self.logger.info(f"Forcing chatters refresh for channel '{channel_name}'")
@@ -252,6 +255,17 @@ class CacheManager:
             return cached if cached else []
 
     async def _fetch_and_cache_chatters(self, channel_name: str, api: TwitchAPI, ttl: int = 1800) -> list[ChatterData]:
+        """
+        Internal method to fetch chatters from Twitch API and cache them.
+
+        Args:
+            channel_name: Twitch channel name
+            api: Twitch API client
+            ttl: Cache time-to-live in seconds
+
+        Returns:
+            Normalized list of ChatterData objects
+        """
         api_chatters = await api.get_chatters(channel_name)
         normalized = [self._normalize_chatter(c) for c in api_chatters]
         await self.update_chatters_cache(channel_name, normalized, ttl)
@@ -260,13 +274,13 @@ class CacheManager:
     @staticmethod
     def _normalize_chatter(c: Any) -> ChatterData:
         """
-        Normalize a raw Twitch API object or dict to a ChatterData instance.
+        Normalize a raw Twitch user object or dictionary into ChatterData.
 
         Args:
-            c: Raw Twitch user object or dict.
+            c: Twitch API user object or dictionary
 
         Returns:
-            ChatterData object.
+            ChatterData instance
         """
         if hasattr(c, "id") and hasattr(c, "name"):
             return ChatterData(
@@ -286,14 +300,14 @@ class CacheManager:
     @staticmethod
     def _find_user_id(chatters: list[ChatterData], username_lower: str) -> str | None:
         """
-        Find a user's Twitch ID using the cached chatters.
+        Search cached chatters for a specific user ID.
 
         Args:
-            chatters: List of ChatterData to cache.
-            username_lower: Username to look up.
+            chatters: List of ChatterData objects
+            username_lower: Lowercase username to search
 
         Returns:
-            User ID as string if found, else None.
+            User ID as a string if found, otherwise None
         """
         for c in chatters:
             if c.name.lower() == username_lower:

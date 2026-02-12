@@ -181,6 +181,7 @@ def get_oauth_token(token_type: str = "STREAMER_TOKEN") -> dict[str, Any] | None
 
 
 def _create_default_config() -> None:
+    """Create a default settings.ini file with empty Twitch credentials and scopes."""
     config = configparser.ConfigParser()
     config["STREAMER_TOKEN"] = {
         "token": "",

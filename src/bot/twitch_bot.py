@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 class TwitchBot(commands.Bot):  # type: ignore[misc]
-    """Main Twitch bot class handling commands, events, and EventSub integrations."""
+    """Manage Twitch chat, commands, and EventSub integrations."""
 
     config: dict[str, Any]
     token_manager: TokenManager
@@ -39,12 +39,12 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
 
     def __init__(self, token_manager: TokenManager, bot_token: str, redis: Redis) -> None:
         """
-        Initialize the Twitch bot.
+        Initialize the Twitch bot with commands, EventSub, and database integration.
 
         Args:
-            token_manager: Manager for handling token refresh operations
-            bot_token: Bot authentication token
-            redis: Redis connection
+            token_manager: Token manager for handling OAuth tokens.
+            bot_token: Authentication token for the bot.
+            redis: Redis connection for caching and state tracking.
         """
         self.config = load_settings()
         self.token_manager = token_manager
@@ -73,10 +73,12 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
 
     async def event_token_expired(self) -> str | None:
         """
-        Called by TwitchIO when the EventSub token has expired or is invalid.
+        Handle EventSub token expiration.
+
+        Refresh and return a new STREAMER token for EventSub.
 
         Returns:
-            A fresh STREAMER token or None if token refresh failed
+            A valid STREAMER token if refreshed successfully, otherwise None.
         """
         try:
             token = await self.token_manager.get_streamer_token()
@@ -87,7 +89,11 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
             return None
 
     async def event_ready(self) -> None:
-        """Called when the bot is ready and connected to Twitch."""
+        """
+        Handle bot readiness event.
+
+        Connect to database, setup EventSub, and verify Redis connection.
+        """
         self.is_connected = True
 
         if self.db:
@@ -111,8 +117,10 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
         """
         Handle incoming chat messages.
 
+        Mark users as active, trigger keyword handlers, and process commands.
+
         Args:
-            message: The incoming message object
+            message: Incoming Twitch chat message object.
         """
         if message.echo:
             return
@@ -152,43 +160,47 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
         await handle_eventsub_reward(event, self)
 
     async def event_disconnect(self) -> None:
-        """Called when the bot disconnects from Twitch."""
+        """Handle bot disconnection from Twitch and update connection state."""
         logger.warning("Bot disconnected from Twitch")
         self.is_connected = False
 
     @commands.command(name="жопа")
     async def butt(self, ctx: commands.Context) -> None:
-        """Handle the butt command."""
+        """Handle the 'butt' command and invoke command handler."""
         if self.active:
             await self.command_handler.handle_butt(ctx)
 
     @commands.command(name="дрын")
     async def club(self, ctx: commands.Context) -> None:
-        """Handle the club command."""
+        """Handle the 'club' command and invoke command handler."""
         if self.active:
             await self.command_handler.handle_club(ctx)
 
     @commands.command(name="я")
     async def me(self, ctx: commands.Context) -> None:
-        """Handle the "me" command to show user stats."""
+        """Handle the 'me' command and show user statistics."""
         if self.active:
             await self.command_handler.handle_me(ctx)
 
     @commands.command(name="топ")
     async def leaders(self, ctx: commands.Context) -> None:
-        """Handle the leaders command to show top users."""
+        """Handle the 'leaders' command and show top users."""
         if self.active:
             await self.command_handler.handle_leaders(ctx)
 
     @commands.command(name="voteban")
     async def voteban(self, ctx: commands.Context) -> None:
-        """Handle the voteban command."""
+        """Handle the 'voteban' command and invoke command handler."""
         if self.active:
             await self.command_handler.handle_voteban(ctx)
 
     @commands.command(name="очко")
     async def twenty_one(self, ctx: commands.Context) -> None:
-        """Handle the twenty_one command for users with free tickets."""
+        """
+        Handle the 'twenty_one' command for users with free tickets.
+
+        Check ticket availability, enforce global cooldown, and consume a ticket.
+        """
         if not self.active:
             return
 
@@ -210,7 +222,7 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
 
     @commands.command(name="ботзаткнись")
     async def bot_sleep(self, ctx: commands.Context) -> None:
-        """Deactivate the bot (admin only)."""
+        """Deactivate the bot (admin only) and reset override states."""
         if not is_admin(self, ctx.author.name):
             return
         self.active = False
@@ -220,7 +232,7 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
 
     @commands.command(name="ботговори")
     async def bot_wake(self, ctx: commands.Context) -> None:
-        """Activate the bot (admin only)."""
+        """Activate the bot (admin only) and set manual override state."""
         if not is_admin(self, ctx.author.name):
             return
         self.manual_override = True
@@ -229,7 +241,7 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
         await ctx.send("deshovka Бот снова активен!")
 
     async def close(self) -> None:
-        """Clean up resources and close the bot gracefully."""
+        """Clean up resources and close the bot, including EventSub, API, and database."""
         logger.info("Shutdown...")
         self.is_connected = False
 

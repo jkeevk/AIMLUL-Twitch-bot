@@ -15,7 +15,16 @@ TaskType = asyncio.Task[None]
 
 
 class BotManager:
-    """Manage TwitchBot lifecycle, token refresh, watchdog monitoring, and healthcheck."""
+    """
+    Manage the lifecycle of a TwitchBot instance.
+
+    Responsibilities:
+      - Maintain and refresh OAuth tokens
+      - Monitor Twitch WebSocket and EventSub health
+      - Restart the bot if necessary
+      - Provide an internal HTTP healthcheck endpoint
+      - Schedule bot activity (offline/online) according to config
+    """
 
     token_manager: TokenManager
     bot: TwitchBot | None
@@ -37,8 +46,8 @@ class BotManager:
         Initialize BotManager.
 
         Args:
-            token_manager: Token manager instance.
-            redis: Redis instance.
+            token_manager: The TokenManager instance used to handle OAuth tokens.
+            redis: An async Redis client instance for caching and persistence.
         """
         self.token_manager = token_manager
         self.redis = redis
@@ -55,11 +64,13 @@ class BotManager:
 
     async def start_health_server(self, host: str = "127.0.0.1", port: int = 8081) -> None:
         """
-        Start an internal HTTP server for health checking.
+        Start an internal HTTP server to provide a healthcheck endpoint.
+
+        The server exposes a `/health` route that reports the bot's status.
 
         Args:
-            host: Host to bind the health server to.
-            port: Port to listen for health requests.
+            host: The hostname or IP address to bind the health server to.
+            port: The port number to listen on for health requests.
         """
         self.health_app = web.Application()
         self.health_app.add_routes([web.get("/health", self._handle_health)])
@@ -70,20 +81,27 @@ class BotManager:
         logger.info(f"Health server running on {host}:{port}")
 
     async def stop_health_server(self) -> None:
-        """Stop the internal health HTTP server."""
+        """
+        Stop the internal HTTP health server.
+
+        Cleans up the web application runner and logs the shutdown.
+        """
         if self.health_runner:
             await self.health_runner.cleanup()
             logger.info("Health server stopped")
 
     async def _handle_health(self, _: web.Request) -> web.Response:
         """
-        Handle /health HTTP requests.
+        Handle incoming `/health` HTTP requests.
+
+        Checks if the bot is running and its WebSocket connection is healthy.
 
         Args:
-            _: aiohttp request object (not used).
+            _: The aiohttp Request object (unused).
 
         Returns:
-            HTTP 200 OK if bot is healthy, HTTP 500 UNHEALTHY otherwise.
+            web.Response: HTTP 200 with "OK" if the bot is healthy,
+                          HTTP 500 with "UNHEALTHY" otherwise.
         """
         healthy = self._running and self.bot and getattr(self.bot, "is_connected", False)
         if healthy:
@@ -94,12 +112,16 @@ class BotManager:
 
     async def start(self) -> None:
         """
-        Start the bot and background tasks.
+        Start the bot and its background tasks.
 
-        Starts token refresh, watchdog loop and health server.
+        This method starts:
+          - the token refresh loop,
+          - the watchdog loop, and
+          - the scheduled activity loop,
+        as well as the internal health server.
 
-        Args:
-            None.
+        It also continuously attempts to start the TwitchBot instance,
+        restarting it automatically on failure.
         """
         self._running = True
         await self.start_health_server(host="0.0.0.0", port=8081)
@@ -127,10 +149,17 @@ class BotManager:
 
     async def restart_bot(self) -> None:
         """
-        Restart the bot safely.
+        Safely restart the bot.
 
-        Args:
-            None.
+        Cancels the current bot task if running, re-initializes the TwitchBot instance,
+        and starts it again. Acquires a lock to prevent concurrent restarts and
+        resets the WebSocket error count.
+
+        Ensures the bot is either restarted and connected, or logs warnings if it fails
+        to reconnect.
+
+        Returns:
+            None
         """
         async with self._restart_lock:
             if not self._running:
@@ -171,10 +200,15 @@ class BotManager:
 
     async def stop(self) -> None:
         """
-        Stop bot and all background tasks, including health server.
+        Stop the bot and all associated background tasks.
 
-        Args:
-            None.
+        Stops the health server, cancels all running background tasks
+        (token refresh, watchdog, bot task, scheduled activity), and closes
+        both the bot and Redis connections. Ensures a clean shutdown of the
+        BotManager.
+
+        Returns:
+            None
         """
         self._running = False
         await self.stop_health_server()
@@ -199,8 +233,15 @@ class BotManager:
         """
         Periodically refresh OAuth tokens.
 
-        Args:
-            None.
+        Sleeps for the configured refresh delay, then refreshes the bot token.
+        If a streamer token exists, refreshes it as well. Updates the bot's
+        API headers after refreshing tokens.
+
+        Handles exceptions by logging them and retrying after a delay.
+        Exits cleanly if the task is canceled.
+
+        Returns:
+            None
         """
         while self._running:
             settings = load_settings()
@@ -235,7 +276,19 @@ class BotManager:
                 await asyncio.sleep(300)
 
     async def _watchdog_loop(self) -> None:
-        """Monitor Twitch WebSocket health and restart the bot on repeated failures."""
+        """
+        Monitor Twitch WebSocket health and restart the bot on repeated failures.
+
+        Checks the bot's connection and EventSub health at intervals based on the
+        current hour. Increments a websocket error counter when the bot is
+        unhealthy, attempts automatic recovery, and restarts the bot if
+        consecutive failures exceed the threshold.
+
+        Logs all relevant events and errors, and handles exceptions gracefully.
+
+        Returns:
+            None
+        """
         while self._running:
             try:
                 hour = datetime.now().astimezone().hour
@@ -283,10 +336,15 @@ class BotManager:
 
     async def _check_bot_health(self) -> bool:
         """
-        Check bot connection, Twitch WebSocket, and EventSub WebSocket health.
+        Check the health of the bot, including Twitch WebSocket and EventSub.
+
+        Verifies that the bot is connected, that the WebSocket is active,
+        that all expected channels are joined, and that EventSub has at least
+        one active socket. Logs issues and returns False if any critical
+        component is unhealthy.
 
         Returns:
-            True if all critical WS are healthy, False otherwise.
+            bool: True if the bot and all critical connections are healthy, False otherwise.
         """
         if not self.bot:
             logger.debug("Bot not initialized in health check")
@@ -330,10 +388,14 @@ class BotManager:
             return False
 
     async def _check_eventsub(self) -> bool:
-        """Check the health of the EventSub WebSocket client.
+        """
+        Check the health of the EventSub WebSocket client.
+
+        Confirm that the EventSub client exists and has at least one active
+        connected socket. Log warnings if no active sockets are found.
 
         Returns:
-            True if there is at least one active EventSub socket, otherwise False.
+            bool: True if there is at least one active EventSub socket, False otherwise.
         """
         try:
             if not self.bot:
@@ -368,13 +430,14 @@ class BotManager:
 
     async def _check_websocket(self) -> bool:
         """
-        Check internal TwitchIO WebSocket state.
+        Check the internal TwitchIO WebSocket state.
 
-        Args:
-            None.
+        Ensures that the bot is connected, the WebSocket connection is active,
+        and that there are connected channels. Returns False if any of these
+        checks fail.
 
         Returns:
-            True if WS is active, False otherwise.
+            bool: True if the WebSocket is active and channels are connected, False otherwise.
         """
         if not self.bot:
             return False
