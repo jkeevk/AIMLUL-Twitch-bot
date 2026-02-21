@@ -1,6 +1,8 @@
 import asyncio
-from datetime import datetime
+import logging
+from datetime import UTC, datetime
 from datetime import time as dtime
+from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -174,44 +176,83 @@ async def test_healthcheck_returns_unhealthy_when_bot_not_connected(
 
 
 @pytest.mark.asyncio
-async def test_scheduled_bot_activation_sends_message(mock_token_manager: TokenManager, mock_redis: AsyncMock):
-    """Test bot disables itself during offline schedule and sends a notification."""
+async def test_scheduled_bot_activation_sends_message():
+    """Test bot disables itself during offline schedule and sends a notification via Redis."""
+    mock_redis = AsyncMock()
+    mock_token_manager = MagicMock()
+
     bot = TwitchBot(token_manager=mock_token_manager, redis=mock_redis, bot_token="fake_token")
     bot.active = True
     bot.is_connected = True
-    bot.db = MagicMock()
-    bot.db.set_scheduled_offline = AsyncMock()
 
-    bot.send_message = AsyncMock()
+    mock_channel = AsyncMock()
 
-    manager = BotManager(token_manager=mock_token_manager, redis=mock_redis)
-    manager.bot = bot
+    orig_prop = type(bot).connected_channels
 
-    bot.config["schedule"] = {
-        "enabled": True,
-        "offline_from": dtime(0, 0),
-        "offline_to": dtime(23, 59),
-        "timezone": "UTC",
-    }
+    try:
+        type(bot).connected_channels = property(lambda self: [mock_channel])
 
-    fake_now_time = dtime(12, 0)
+        manager = BotManager(token_manager=mock_token_manager, redis=mock_redis)
+        manager.bot = bot
 
-    def in_offline_window(now, start, end):
-        if start < end:
-            return start <= now < end
-        return now >= start or now < end
+        bot.config["schedule"] = {
+            "enabled": True,
+            "offline_from": dtime(0, 0),
+            "offline_to": dtime(23, 59),
+            "timezone": "UTC",
+        }
 
-    schedule = bot.config.get("schedule", {})
-    off_time = schedule.get("offline_from")
-    on_time = schedule.get("offline_to")
+        mock_redis.get.return_value = None
 
-    if in_offline_window(fake_now_time, off_time, on_time):
-        bot.active = False
-        bot.scheduled_offline = True
-        await bot.send_message("Бот автоматически отключен по расписанию")
-        await bot.db.set_scheduled_offline(datetime.now().date(), sent_message=True)
+        fake_now = datetime.now(tz=UTC).replace(hour=12, minute=0, second=0, microsecond=0)
 
-    assert bot.active is False
-    assert bot.scheduled_offline is True
-    bot.db.set_scheduled_offline.assert_awaited_once()
-    bot.send_message.assert_awaited_once_with("Бот автоматически отключен по расписанию")
+        def in_offline_window(now, start, end):
+            if start < end:
+                return start <= now < end
+            return now >= start or now < end
+
+        schedule = bot.config.get("schedule", {})
+        off_time = schedule.get("offline_from")
+        on_time = schedule.get("offline_to")
+
+        if in_offline_window(fake_now.time(), off_time, on_time):
+            bot.active = False
+            for channel in bot.connected_channels:
+                await channel.send("Bot is entering scheduled sleep mode. Use !ботговори to wake it (admin only).")
+
+            today_str = str(fake_now.date())
+            message_key = f"bot:schedule_msg:{today_str}"
+            seconds_until_end_of_day = int(
+                (
+                    datetime.combine(fake_now.date() + timedelta(days=1), dtime.min, tzinfo=UTC) - fake_now
+                ).total_seconds()
+            )
+            await mock_redis.set(message_key, "1", ex=seconds_until_end_of_day)
+
+        # --- Assertions ---
+        assert bot.active is False
+        for channel in bot.connected_channels:
+            channel.send.assert_awaited_once_with(
+                "Bot is entering scheduled sleep mode. Use !ботговори to wake it (admin only)."
+            )
+        mock_redis.set.assert_awaited_once()
+    finally:
+        type(bot).connected_channels = orig_prop
+
+
+@pytest.mark.asyncio
+async def test_report_status_logs_info(bot_manager: BotManager, caplog):
+    """Test that report_status logs bot status correctly."""
+    bot_manager.bot = MagicMock(spec=TwitchBot)
+    bot_manager.bot.active = True
+    bot_manager.bot.redis = AsyncMock()
+    bot_manager.bot.redis.info = AsyncMock(return_value={"db0": {"key1": "val"}})
+
+    caplog.set_level(logging.INFO)
+
+    await bot_manager.report_status()
+
+    # --- Assertions ---
+    assert "Bot Status Report" in caplog.text
+    assert "Active: True" in caplog.text
+    assert "Redis keys count: 1" in caplog.text
