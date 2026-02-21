@@ -9,6 +9,7 @@ from twitchio import Message
 from twitchio.ext import commands
 
 from src.api.twitch_api import TwitchAPI
+from src.bot.commands_config import COMMANDS
 from src.commands.command_handler import CommandHandler
 from src.commands.managers.cache_manager import CacheManager
 from src.commands.permissions import is_admin
@@ -160,37 +161,37 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
         logger.warning("Bot disconnected from Twitch")
         self.is_connected = False
 
-    @commands.command(name="жопа")
+    @commands.command(name=COMMANDS["butt"])
     async def butt(self, ctx: commands.Context) -> None:
         """Handle the 'butt' command and invoke command handler."""
         if self.active:
             await self.command_handler.handle_butt(ctx)
 
-    @commands.command(name="дрын")
+    @commands.command(name=COMMANDS["club"])
     async def club(self, ctx: commands.Context) -> None:
         """Handle the 'club' command and invoke command handler."""
         if self.active:
             await self.command_handler.handle_club(ctx)
 
-    @commands.command(name="я")
+    @commands.command(name=COMMANDS["me"])
     async def me(self, ctx: commands.Context) -> None:
         """Handle the 'me' command and show user statistics."""
         if self.active:
             await self.command_handler.handle_me(ctx)
 
-    @commands.command(name="топ")
+    @commands.command(name=COMMANDS["leaders"])
     async def leaders(self, ctx: commands.Context) -> None:
         """Handle the 'leaders' command and show top users."""
         if self.active:
             await self.command_handler.handle_leaders(ctx)
 
-    @commands.command(name="voteban")
+    @commands.command(name=COMMANDS["voteban"])
     async def voteban(self, ctx: commands.Context) -> None:
         """Handle the 'voteban' command and invoke command handler."""
         if self.active:
             await self.command_handler.handle_voteban(ctx)
 
-    @commands.command(name="очко")
+    @commands.command(name=COMMANDS["twenty_one"])
     async def twenty_one(self, ctx: commands.Context) -> None:
         """
         Handle the 'twenty_one' command for users with free tickets.
@@ -216,7 +217,7 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
         await self.command_handler.handle_twenty_one(ctx)
         await self.command_handler.twenty_one_game.consume_ticket(twitch_id)
 
-    @commands.command(name="ботзаткнись")
+    @commands.command(name=COMMANDS["bot_sleep"])
     async def bot_sleep(self, ctx: commands.Context) -> None:
         """Deactivate the bot (admin only) and reset override states."""
         if not is_admin(self, ctx.author.name):
@@ -224,7 +225,7 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
         if hasattr(self, "manager"):
             await self.manager.set_bot_sleep()
 
-    @commands.command(name="ботговори")
+    @commands.command(name=COMMANDS["bot_wake"])
     async def bot_wake(self, ctx: commands.Context) -> None:
         """Activate the bot (admin only) and cancel today's override."""
         if not is_admin(self, ctx.author.name):
