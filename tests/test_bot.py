@@ -76,15 +76,15 @@ async def test_command_activation_deactivation(bot_instance: TwitchBot):
     ctx = AsyncMock()
     ctx.author.name = "admin_user"
 
+    mock_manager = AsyncMock()
+    bot_instance.manager = mock_manager
+
     with patch("src.bot.twitch_bot.is_admin", return_value=True):
         await bot_instance.bot_sleep(ctx)
-        assert not bot_instance.active
-        ctx.send.assert_awaited_once_with("banka Алибидерчи! Бот выключен.")
+        mock_manager.set_bot_sleep.assert_awaited_once()
 
-        ctx.send.reset_mock()
         await bot_instance.bot_wake(ctx)
-        assert bot_instance.active
-        ctx.send.assert_awaited_once_with("deshovka Бот снова активен!")
+        mock_manager.set_bot_wake.assert_awaited_once()
 
 
 @pytest.mark.asyncio
