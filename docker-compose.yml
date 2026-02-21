@@ -36,6 +36,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-botpassword}
       POSTGRES_DB: ${POSTGRES_DB:-twitch_bot}
       POSTGRES_INITDB_ARGS: "--locale=en_US.UTF-8"
+      PG_TZ: "Europe/Moscow"
     volumes:
       - ./data/db:/var/lib/postgresql/data
     ports:
@@ -62,6 +63,16 @@ services:
       timeout: 5s
       retries: 5
       start_period: 5s
+    networks:
+      - webnet
+
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: redis-commander
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    ports:
+      - "8081:8081"
     networks:
       - webnet
 
