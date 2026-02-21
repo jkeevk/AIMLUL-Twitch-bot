@@ -20,7 +20,6 @@ COMMANDS = {
     # Admin commands
     "bot_sleep": "ботзаткнись",
     "bot_wake": "ботговори",
-
     # Game commands
     "butt": "жопа",
     "club": "дрын",

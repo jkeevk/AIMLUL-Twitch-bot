@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from datetime import datetime, timedelta
+from typing import Any
 
 from aiohttp import web
 from redis.asyncio import Redis
@@ -40,6 +41,7 @@ class BotManager:
     health_app: web.Application | None
     health_runner: web.AppRunner | None
     scheduled_task: TaskType | None
+    _status_task: TaskType | None
 
     def __init__(self, token_manager: TokenManager, redis: Redis) -> None:
         """
@@ -61,6 +63,126 @@ class BotManager:
         self.health_app = None
         self.health_runner = None
         self.scheduled_task = None
+        self._status_task = None
+        self.status_interval = 1800
+
+    async def _periodic_status_report(self) -> None:
+        """
+        Periodically report the current bot status at fixed intervals.
+
+        This task continuously calls `report_status()` every `self.status_interval`
+        seconds. Exceptions during status reporting are caught and logged without
+        stopping the loop. Intended to run as a background task while the bot is active.
+
+        Returns:
+            None
+        """
+        while True:
+            try:
+                await self.report_status()
+            except Exception as e:
+                logger.error(f"Failed to report status: {e}")
+            await asyncio.sleep(self.status_interval)
+
+    async def report_status(self) -> None:
+        """
+        Gather and log the current status of the bot.
+
+        The status report includes:
+          - Whether the bot is active
+          - Twitch WebSocket and IRC connection status
+          - Configured and joined channels
+          - EventSub subscription and active socket counts
+          - Redis key count
+
+        Accesses protected members via helper methods to reduce mypy warnings.
+
+        Log a detailed summary of the bot state. Exceptions during
+        data gathering are caught and logged; the function does not raise
+        them externally.
+
+        Returns:
+            None
+        """
+        bot = self.bot
+        if bot is None:
+            logger.warning("Bot is not initialized; skipping status report")
+            return
+
+        active: bool | None = getattr(bot, "active", None)
+
+        conn = self._get_ws_connection(bot)
+        connected: bool = getattr(conn, "is_alive", False) if conn else False
+
+        channels_configured: list[str] = []
+        if hasattr(bot, "config") and bot.config:
+            channels_configured = bot.config.get("channels", [])
+
+        joined_count: int = 0
+        if conn:
+            initial_channels = getattr(conn, "_initial_channels", [])
+            if isinstance(initial_channels, list):
+                joined_count = len(initial_channels)
+
+        irc_connected: bool = connected
+
+        eventsub_status: dict[str, int | bool] = {"subscribed": False, "sockets": 0, "active": 0}
+        es_client_sockets = self._get_eventsub_sockets(bot)
+        eventsub = getattr(bot, "eventsub", None)
+        if eventsub:
+            eventsub_status["subscribed"] = getattr(eventsub, "subscribed", False)
+            if es_client_sockets is not None:
+                eventsub_status["sockets"] = len(es_client_sockets)
+                eventsub_status["active"] = sum(1 for s in es_client_sockets if getattr(s, "is_connected", False))
+
+        redis_keys_count: int | str = "N/A"
+        try:
+            if hasattr(bot, "redis") and bot.redis:
+                info = await bot.redis.info()
+                db0 = info.get("db0", {})
+                if isinstance(db0, dict):
+                    redis_keys_count = len(db0)
+        except Exception as e:
+            logger.warning(f"Redis error when counting keys: {e}")
+
+        logger.info(
+            "Bot Status Report:\n"
+            f"  Active: {active}\n"
+            f"  Connected (WebSocket IRC alive): {connected}\n"
+            f"  Channels configured: {len(channels_configured)}\n"
+            f"  Channels joined: {joined_count}\n"
+            f"  EventSub: subscribed={eventsub_status['subscribed']}, "
+            f"sockets={eventsub_status['sockets']}, active={eventsub_status['active']}\n"
+            f"  WebSocket IRC: connected={irc_connected}, joined_channels={joined_count}\n"
+            f"  Redis keys count: {redis_keys_count}"
+        )
+
+    @staticmethod
+    def _get_ws_connection(bot: "TwitchBot") -> Any:
+        """
+        Safely get the bot's WebSocket connection.
+
+        Args:
+            bot: TwitchBot instance.
+
+        Returns:
+            The _connection object or None if not present.
+        """
+        return getattr(bot, "_connection", None)
+
+    @staticmethod
+    def _get_eventsub_sockets(bot: "TwitchBot") -> list[Any]:
+        """
+        Safely retrieve EventSub client sockets.
+
+        Args:
+            bot: TwitchBot instance.
+
+        Returns:
+            List of sockets or empty list if unavailable.
+        """
+        client = getattr(getattr(bot, "eventsub", None), "client", None)
+        return getattr(client, "_sockets", [])
 
     async def start_health_server(self, host: str = "127.0.0.1", port: int = 8081) -> None:
         """
@@ -129,6 +251,7 @@ class BotManager:
         self.refresh_task = asyncio.create_task(self._token_refresh_loop())
         self.watchdog_task = asyncio.create_task(self._watchdog_loop())
         self.scheduled_task = asyncio.create_task(self._scheduled_activity_loop())
+        self._status_task = asyncio.create_task(self._periodic_status_report())
 
         while self._running:
             try:
@@ -216,7 +339,7 @@ class BotManager:
 
         tasks: list[TaskType] = []
 
-        for t in (self.refresh_task, self.watchdog_task, self.bot_task, self.scheduled_task):
+        for t in (self.refresh_task, self.watchdog_task, self.bot_task, self.scheduled_task, self._status_task):
             if t and not t.done():
                 t.cancel()
                 tasks.append(t)
@@ -410,9 +533,9 @@ class BotManager:
             client = eventsub.client
 
             if hasattr(client, "_sockets"):
-                sockets = client._sockets
+                sockets = self._get_eventsub_sockets(self.bot)
                 if not sockets:
-                    logger.debug("No EventSub sockets")
+                    logger.debug("No EventSub sockets found")
                     return False
 
                 active_sockets = [s for s in sockets if hasattr(s, "is_connected") and s.is_connected]
@@ -448,11 +571,10 @@ class BotManager:
                 logger.debug("Bot is_connected = False")
                 return False
 
-            connection = getattr(self.bot, "_connection", None)
-            if connection and hasattr(connection, "connected"):
-                if not connection.connected:
-                    logger.debug("Connection.connected = False")
-                    return False
+            connection = self._get_ws_connection(self.bot)
+            if connection and getattr(connection, "connected", False) is False:
+                logger.debug("Connection.connected = False")
+                return False
 
             if hasattr(self.bot, "connected_channels") and not self.bot.connected_channels:
                 logger.debug("No connected channels — WS likely dead")
