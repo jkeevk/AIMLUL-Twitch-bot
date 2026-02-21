@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Integer, String, func
+from sqlalchemy import DateTime, Integer, String, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -63,33 +63,3 @@ class PlayerStats(Base):
             f"win_rate={self.win_rate():.1f}%"
             f")"
         )
-
-
-class ScheduledOffline(Base):
-    """
-    Represents a scheduled offline record for the bot.
-
-    Each record store the last date the bot was automatically disabled
-    according to the schedule. This helps prevent sending repeated offline
-    messages on restarts.
-
-    Attributes:
-        id (int): Primary key.
-        date (datetime): The date the bot was scheduled to go offline.
-        sent_message (bool): Whether the offline message has already been sent for this date.
-    """
-
-    __tablename__ = "scheduled_offline"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    date: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
-    sent_message: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-
-    def __repr__(self) -> str:
-        """
-        Return a string representation of the ScheduledOffline object.
-
-        Returns:
-            str: A string showing the id, date, and sent_message flag.
-        """
-        return f"ScheduledOffline(id={self.id}, date={self.date}, sent_message={self.sent_message})"

@@ -1,4 +1,3 @@
-import datetime
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -7,7 +6,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from .models import Base, PlayerStats, ScheduledOffline
+from .models import Base, PlayerStats
 
 logger = logging.getLogger(__name__)
 
@@ -215,41 +214,3 @@ class Database:
         except SQLAlchemyError as e:
             logger.error(f"Remove tickets error: {e}", exc_info=True)
             return 0
-
-    async def get_scheduled_offline(self, date: datetime.date) -> ScheduledOffline | None:
-        """
-        Get the scheduled offline record for a specific date.
-
-        Args:
-            date (datetime.date): The date to fetch the offline record for.
-
-        Returns:
-            ScheduledOffline | None: The scheduled offline record if exists, else None.
-        """
-        try:
-            async with self.session_scope() as session:
-                result = await session.execute(select(ScheduledOffline).where(ScheduledOffline.date == date))
-                return result.scalars().first()
-        except SQLAlchemyError as e:
-            logger.error(f"Get scheduled offline error: {e}", exc_info=True)
-            return None
-
-    async def set_scheduled_offline(self, date: datetime.date, sent_message: bool = True) -> None:
-        """
-        Create or update a scheduled offline record.
-
-        Args:
-            date (datetime.date): Date of the scheduled offline.
-            sent_message (bool): Whether the offline message has been sent. Defaults to True.
-        """
-        try:
-            async with self.session_scope() as session:
-                record = await self.get_scheduled_offline(date)
-                if not record:
-                    record = ScheduledOffline(date=date, sent_message=sent_message)
-                    session.add(record)
-                else:
-                    record.sent_message = sent_message
-                await session.flush()
-        except SQLAlchemyError as e:
-            logger.error(f"Set scheduled offline error: {e}", exc_info=True)

@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from aiohttp import web
 from redis.asyncio import Redis
@@ -135,7 +135,7 @@ class BotManager:
                 token = await self.token_manager.get_access_token("BOT_TOKEN")
                 self.bot = TwitchBot(self.token_manager, token, redis=self.redis)
                 self.bot_task = asyncio.create_task(self.bot.start())
-
+                self.bot.manager = self
                 logger.info("Bot started")
                 await self.bot_task
 
@@ -184,6 +184,7 @@ class BotManager:
                 token = await self.token_manager.get_access_token("BOT_TOKEN")
                 self.bot = TwitchBot(self.token_manager, token, redis=self.redis)
                 self.bot_task = asyncio.create_task(self.bot.start())
+                self.bot.manager = self
                 self._websocket_error_count = 0
 
                 await asyncio.sleep(10)
@@ -465,94 +466,183 @@ class BotManager:
 
     async def _scheduled_activity_loop(self) -> None:
         """
-        Manage the bot's activity according to a schedule.
+        Control bot activity based on schedule and admin override.
 
-        This coroutine runs continuously and checks whether the current time
-        falls within the configured offline window. It will automatically
-        deactivate the bot and send an offline message if necessary. It also
-        persists the last shutdown in the database to avoid sending repeated
-        messages on bot restarts.
+        This loop checks the bot's current time and Redis-backed per-day override
+        state. It manages entering and exiting offline mode based on the schedule.
 
-        The offline window can be overridden manually by an admin using commands.
+        Features:
+            - Schedule determines when the bot should be offline.
+            - Admin override (!ботговори) disables schedule for today only.
+            - Override automatically expires at midnight (date-based key).
+            - Redis is used as the single source of truth for per-day override.
+            - Restart-safe and fully deterministic.
+
+        The loop runs continuously while the manager is active.
+
+        Returns:
+            None
         """
         from datetime import time as dtime
-        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+        from zoneinfo import ZoneInfo
 
-        def in_offline_window(time_to_check: dtime, start: dtime, end: dtime) -> bool:
+        def in_offline_window(now: dtime, start: dtime, end: dtime) -> bool:
             """
-            Check if the current time falls within the offline window.
+            Determine if the current time is within the offline window.
+
+            This function correctly handles offline windows that span midnight
+            (e.g., 19:00–06:00).
 
             Args:
-                time_to_check (dtime): The time to check.
-                start (dtime): The start time of the offline window.
-                end (dtime): The end time of the offline window.
+                now (dtime): Current time.
+                start (dtime): Start of the offline period.
+                end (dtime): End of the offline period.
 
             Returns:
-                bool: True if time_to_check is within the window, False otherwise.
+                bool: True if `now` falls within the offline window, False otherwise.
             """
             if start < end:
-                return start <= time_to_check < end
-            return time_to_check >= start or time_to_check < end
+                return start <= now < end
+            return now >= start or now < end
 
         while self._running:
-            if not self.bot or not getattr(self.bot, "is_connected", False):
-                await asyncio.sleep(5)
-                continue
-
-            bot = self.bot
-            schedule = bot.config.get("schedule", {})
-            if not schedule.get("enabled"):
-                await asyncio.sleep(60)
-                continue
-
-            off_time = schedule.get("offline_from")
-            on_time = schedule.get("offline_to")
-            timezone = schedule.get("timezone")
-
-            if not off_time or not on_time or not timezone:
-                await asyncio.sleep(60)
-                continue
-
             try:
+                if not self.bot:
+                    await asyncio.sleep(5)
+                    continue
+
+                bot = self.bot
+                schedule = bot.config.get("schedule", {})
+                if not schedule.get("enabled"):
+                    await asyncio.sleep(60)
+                    continue
+
+                off_time = schedule.get("offline_from")
+                on_time = schedule.get("offline_to")
+                timezone = schedule.get("timezone")
+                if not off_time or not on_time or not timezone:
+                    await asyncio.sleep(60)
+                    continue
+
                 tz = ZoneInfo(timezone)
-            except ZoneInfoNotFoundError:
-                await asyncio.sleep(60)
-                continue
+                now_dt = datetime.now(tz)
+                now_time = now_dt.time()
+                today_str = str(now_dt.date())
 
-            now_dt = datetime.now(tz)
-            now_time = now_dt.time()
-            today = now_dt.date()
+                override_key = f"bot:override:{today_str}"
+                message_key = f"bot:schedule_msg:{today_str}"
 
-            assert bot.db is not None
-            record = await bot.db.get_scheduled_offline(today)
-            message_already_sent = record.sent_message if record else False
+                today_override = await self.redis.get(override_key)
+                message_sent = await self.redis.get(message_key)
 
-            if not getattr(bot, "manual_override", False) and in_offline_window(now_time, off_time, on_time):
-                if not getattr(bot, "scheduled_offline", False):
-                    bot.active = False
-                    bot.scheduled_offline = True
-                    logger.info(f"[{now_dt}] Bot is going offline (sleep time: {off_time} - {on_time})")
+                should_be_offline = in_offline_window(now_time, off_time, on_time) and not today_override
 
-                if not message_already_sent:
-                    for channel in getattr(bot, "connected_channels", []):
-                        await channel.send(
-                            "Bedge отключаюсь на время киношного. "
-                            "Разбудить: !ботговори Заткнуть: !ботзаткнись (admin only)"
-                        )
-                    await bot.db.set_scheduled_offline(today, sent_message=True)
+                # --- ENTER OFFLINE MODE ---
+                if should_be_offline:
+                    if bot.active:
+                        bot.active = False
+                        logger.info(f"[{now_dt}] Entering scheduled offline window " f"({off_time}-{on_time})")
 
-            else:
-                if getattr(bot, "scheduled_offline", False) or message_already_sent:
-                    bot.scheduled_offline = False
-                    bot.manual_override = False
+                        if not message_sent:
+                            for channel in bot.connected_channels:
+                                await channel.send(
+                                    "Bot is entering scheduled sleep mode. " "Use !ботговори to wake it (admin only)."
+                                )
+                            tomorrow = datetime.combine(
+                                now_dt.date() + timedelta(days=1), datetime.min.time(), tzinfo=tz
+                            )
+                            seconds_until_end_of_day = int((tomorrow - now_dt).total_seconds())
+                            await self.redis.set(message_key, "1", ex=seconds_until_end_of_day)
 
-                    if not getattr(bot, "active", True):
+                # --- EXIT OFFLINE MODE ---
+                else:
+                    if not bot.active:
                         bot.active = True
-                        for channel in getattr(bot, "connected_channels", []):
-                            await channel.send("peepoArrive работаем")
-                        logger.info(f"[{now_dt}] Bot is back online (wake-up time: {on_time})")
+                        logger.info(f"[{now_dt}] Scheduled wake-up triggered")
 
-                    if getattr(bot, "db", None):
-                        await bot.db.set_scheduled_offline(today, sent_message=False)
+                        if self.bot_task is None or self.bot_task.done() or not getattr(bot, "is_connected", False):
+                            logger.warning("Bot not running after sleep, restarting...")
+                            await self.restart_bot()
+                            bot = self.bot
 
-            await asyncio.sleep(60)
+                        for channel in bot.connected_channels:
+                            await channel.send("Bot is now active.")
+
+                        await self.redis.delete(message_key)
+
+                await asyncio.sleep(60)
+
+            except Exception as e:
+                logger.exception(f"Scheduled activity loop error: {e}")
+                await asyncio.sleep(60)
+
+    async def set_bot_sleep(self) -> None:
+        """
+        Deactivate the bot for today as an admin override.
+
+        This command sets a Redis key for today to indicate the override.
+        The bot will remain inactive until the end of the current day.
+
+        Returns:
+            None
+        """
+        if not self.bot:
+            return
+
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        schedule = self.bot.config.get("schedule", {})
+        timezone = schedule.get("timezone")
+        if not timezone:
+            logger.warning("Timezone not configured, cannot set sleep")
+            return
+
+        tz = ZoneInfo(timezone)
+        now = datetime.now(tz)
+        today_str = str(now.date())
+        override_key = f"bot:override:{today_str}"
+
+        tomorrow = datetime.combine(now.date() + timedelta(days=1), datetime.min.time(), tzinfo=tz)
+        seconds_until_end_of_day = int((tomorrow - now).total_seconds())
+
+        await self.redis.set(override_key, "1", ex=seconds_until_end_of_day)
+        self.bot.active = False
+
+        for channel in self.bot.connected_channels:
+            await channel.send("banka Алибидерчи! Бот выключен до конца дня.")
+
+        logger.info(f"Bot set to sleep (override) until midnight ({today_str})")
+
+    async def set_bot_wake(self) -> None:
+        """
+        Activate the bot and cancel today's override.
+
+        This command deletes the Redis override key for today.
+        The bot will resume normal operation immediately.
+
+        Returns:
+            None
+        """
+        if not self.bot:
+            return
+
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        schedule = self.bot.config.get("schedule", {})
+        timezone = schedule.get("timezone")
+        if not timezone:
+            logger.warning("Timezone not configured, cannot wake bot")
+            return
+
+        tz = ZoneInfo(timezone)
+        today_str = str(datetime.now(tz).date())
+        override_key = f"bot:override:{today_str}"
+        await self.redis.delete(override_key)
+
+        self.bot.active = True
+        for channel in self.bot.connected_channels:
+            await channel.send("deshovka Бот снова активен!")
+
+        logger.info(f"Bot activated (override cleared) for {today_str}")

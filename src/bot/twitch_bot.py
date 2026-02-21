@@ -33,8 +33,6 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
     command_handler: CommandHandler
     eventsub: EventSubManager
     triggers: dict[str, Any]
-    scheduled_offline: bool
-    manual_override: bool
     is_connected: bool
 
     def __init__(self, token_manager: TokenManager, bot_token: str, redis: Redis) -> None:
@@ -49,8 +47,6 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
         self.config = load_settings()
         self.token_manager = token_manager
         self.active = True
-        self.scheduled_offline = False
-        self.manual_override = False
         self.is_connected = False
         self.redis = redis
 
@@ -225,20 +221,16 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
         """Deactivate the bot (admin only) and reset override states."""
         if not is_admin(self, ctx.author.name):
             return
-        self.active = False
-        self.manual_override = False
-        self.scheduled_offline = False
-        await ctx.send("banka Алибидерчи! Бот выключен.")
+        if hasattr(self, "manager"):
+            await self.manager.set_bot_sleep()
 
     @commands.command(name="ботговори")
     async def bot_wake(self, ctx: commands.Context) -> None:
-        """Activate the bot (admin only) and set manual override state."""
+        """Activate the bot (admin only) and cancel today's override."""
         if not is_admin(self, ctx.author.name):
             return
-        self.manual_override = True
-        self.scheduled_offline = False
-        self.active = True
-        await ctx.send("deshovka Бот снова активен!")
+        if hasattr(self, "manager"):
+            await self.manager.set_bot_wake()
 
     async def close(self) -> None:
         """Clean up resources and close the bot, including EventSub, API, and database."""
