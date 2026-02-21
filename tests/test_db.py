@@ -123,3 +123,27 @@ async def test_win_rate_calculation() -> None:
 
     player = PlayerStats(twitch_id="y", username="Test2", wins=0, losses=0)
     assert player.win_rate() == 0.0
+
+
+@pytest.mark.asyncio
+async def test_add_and_remove_tickets(db: Database):
+    """Test adding and removing tickets for a player in the database."""
+    # Add 5 tickets to player1
+    tickets = await db.add_tickets("player1", "Alice", 5)
+    assert tickets == 5
+
+    # Add 3 more tickets to player1 (total should be 8)
+    tickets = await db.add_tickets("player1", "Alice", 3)
+    assert tickets == 8
+
+    # Remove 4 tickets (should leave 4 remaining)
+    tickets = await db.remove_tickets("player1", 4)
+    assert tickets == 4
+
+    # Try to remove 10 tickets (only 4 remaining, should return 0)
+    tickets = await db.remove_tickets("player1", 10)
+    assert tickets == 0
+
+    # Try to remove tickets for a non-existent player (should return 0)
+    tickets = await db.remove_tickets("unknown", 1)
+    assert tickets == 0

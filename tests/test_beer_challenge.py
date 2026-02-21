@@ -281,3 +281,101 @@ async def test_beer_challenge_game_logic_with_mocks():
 
     actual_message = mock_channel.send.call_args[0][0]
     assert "че пишешь то" in actual_message.lower()
+
+
+@pytest.mark.asyncio
+async def test_beer_challenge_success_logic_fixed():
+    """Test BeerChallengeGame with numeric input that succeeds (patch random)."""
+    from src.commands.command_handler import CommandHandler
+
+    mock_bot = MagicMock()
+    mock_channel = AsyncMock()
+    mock_channel.send = AsyncMock()
+    mock_bot.get_channel = MagicMock(return_value=mock_channel)
+    mock_bot.join_channels = AsyncMock()
+    mock_bot.active = True
+    mock_bot.db = AsyncMock()
+    mock_bot.db.add_tickets = AsyncMock()
+    mock_bot.api = AsyncMock()
+    mock_bot.api.timeout_user = AsyncMock()
+
+    command_handler = CommandHandler(mock_bot)
+    game = command_handler.beer_challenge_game
+
+    # Always win random
+    with patch("random.randint", return_value=1):
+        await game.handle_beer_challenge_command(
+            user_id="123", user_name="TestUser", user_input="5", channel_name="testchannel"
+        )
+
+    mock_bot.db.add_tickets.assert_awaited_once_with("123", "TestUser", 1)
+    mock_channel.send.assert_awaited_once()
+    msg = mock_channel.send.call_args[0][0]
+    assert "@TestUser, разминочная" in msg
+
+
+@pytest.mark.asyncio
+async def test_beer_challenge_failure_non_privileged_logic_fixed():
+    """Test BeerChallengeGame fail for non-privileged user (patch random.choice)."""
+    from src.commands.command_handler import CommandHandler
+
+    mock_bot = MagicMock()
+    mock_channel = AsyncMock()
+    mock_channel.send = AsyncMock()
+    mock_bot.get_channel = MagicMock(return_value=mock_channel)
+    mock_bot.join_channels = AsyncMock()
+    mock_bot.active = True
+    mock_bot.db = AsyncMock()
+    mock_bot.db.add_tickets = AsyncMock()
+    mock_bot.api = AsyncMock()
+    mock_bot.api.timeout_user = AsyncMock()
+
+    command_handler = CommandHandler(mock_bot)
+    game = command_handler.beer_challenge_game
+
+    # Always loose random
+    with patch("random.randint", return_value=100):
+        with patch("random.choice", return_value="@NormalUser обблевал весь пол и пополз откисать на диван PUKERS"):
+            with patch("src.commands.games.beer_challenge.is_privileged", return_value=False):
+                await game.handle_beer_challenge_command(
+                    user_id="123", user_name="NormalUser", user_input="10", channel_name="testchannel"
+                )
+
+    mock_bot.db.add_tickets.assert_not_called()
+    mock_channel.send.assert_awaited_once()
+    msg = mock_channel.send.call_args[0][0]
+    assert "NormalUser обблевал" in msg
+    mock_bot.api.timeout_user.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_beer_challenge_failure_privileged_logic_fixed():
+    """Test BeerChallengeGame fail for privileged user (no timeout, patch random.choice)."""
+    from src.commands.command_handler import CommandHandler
+
+    mock_bot = MagicMock()
+    mock_channel = AsyncMock()
+    mock_channel.send = AsyncMock()
+    mock_bot.get_channel = MagicMock(return_value=mock_channel)
+    mock_bot.join_channels = AsyncMock()
+    mock_bot.active = True
+    mock_bot.db = AsyncMock()
+    mock_bot.db.add_tickets = AsyncMock()
+    mock_bot.api = AsyncMock()
+    mock_bot.api.timeout_user = AsyncMock()
+
+    command_handler = CommandHandler(mock_bot)
+    game = command_handler.beer_challenge_game
+
+    with patch("random.randint", return_value=100):
+        with patch("random.choice", return_value="@PrivUser ушел в пивную кому ystal"):
+            with patch("src.commands.games.beer_challenge.is_privileged", return_value=True):
+                await game.handle_beer_challenge_command(
+                    user_id="123", user_name="PrivUser", user_input="10", channel_name="testchannel"
+                )
+
+    mock_bot.db.add_tickets.assert_not_called()
+    mock_channel.send.assert_awaited_once()
+    msg = mock_channel.send.call_args[0][0]
+    assert "PrivUser ушел" in msg
+    mock_bot.api.timeout_user.assert_not_called()

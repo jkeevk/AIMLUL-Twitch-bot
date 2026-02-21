@@ -256,3 +256,210 @@ async def test_report_status_logs_info(bot_manager: BotManager, caplog):
     assert "Bot Status Report" in caplog.text
     assert "Active: True" in caplog.text
     assert "Redis keys count: 1" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_restart_bot_success(mock_token_manager, mock_redis):
+    """Test that restart_bot successfully starts a new bot instance."""
+    manager = BotManager(token_manager=mock_token_manager, redis=mock_redis)
+    manager._running = True
+
+    # Mock token retrieval
+    mock_token_manager.get_access_token = AsyncMock(return_value="token")
+
+    # Create a fake bot instance
+    fake_bot = MagicMock(spec=TwitchBot)
+    fake_bot.start = AsyncMock()
+    fake_bot.is_connected = True
+
+    # Patch TwitchBot constructor and asyncio.sleep
+    with (
+        patch("src.bot.manager.TwitchBot", return_value=fake_bot),
+        patch("src.bot.manager.asyncio.sleep", new_callable=AsyncMock),
+    ):
+        await manager.restart_bot()
+
+    # Ensure the new bot is assigned and websocket error counter reset
+    assert manager.bot is not None
+    assert manager._websocket_error_count == 0
+
+
+@pytest.mark.asyncio
+async def test_set_bot_sleep(mock_token_manager, mock_redis):
+    """Test that set_bot_sleep updates Redis and notifies connected channels."""
+    manager = BotManager(token_manager=mock_token_manager, redis=mock_redis)
+
+    mock_redis.set = AsyncMock()
+
+    # Prepare a fake bot with connected channels
+    bot = MagicMock(spec=TwitchBot)
+    channel = AsyncMock()
+    channel.send = AsyncMock()
+    bot.connected_channels = [channel]
+    bot.config = {"schedule": {"timezone": "UTC"}}
+
+    manager.bot = bot
+
+    await manager.set_bot_sleep()
+
+    # Check Redis set and channel notifications
+    mock_redis.set.assert_awaited_once()
+    channel.send.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_check_eventsub_success(mock_token_manager, mock_redis):
+    """Test _check_eventsub returns True when sockets are connected."""
+    manager = BotManager(token_manager=mock_token_manager, redis=mock_redis)
+
+    # Fake eventsub socket connected
+    socket = MagicMock()
+    socket.is_connected = True
+
+    bot = MagicMock(spec=TwitchBot)
+    bot.eventsub = MagicMock()
+    bot.eventsub.client = MagicMock()
+    bot.eventsub.client._sockets = [socket]
+
+    manager.bot = bot
+
+    result = await manager._check_eventsub()
+    assert result is True
+
+
+@pytest.mark.asyncio
+async def test_check_websocket_success(mock_token_manager, mock_redis):
+    """Test _check_websocket returns True when bot connection is healthy."""
+    manager = BotManager(token_manager=mock_token_manager, redis=mock_redis)
+
+    bot = MagicMock(spec=TwitchBot)
+    bot.is_connected = True
+
+    # Mock internal connection object
+    connection = MagicMock()
+    connection.connected = True
+    bot._connection = connection
+    bot.connected_channels = [MagicMock()]
+
+    manager.bot = bot
+
+    result = await manager._check_websocket()
+    assert result is True
+
+
+@pytest.mark.asyncio
+async def test_token_refresh_loop_runs_once(mock_token_manager, mock_redis):
+    """Test _token_refresh_loop calls refresh_access_token once per iteration."""
+    manager = BotManager(token_manager=mock_token_manager, redis=mock_redis)
+    manager._running = True
+
+    mock_token_manager.refresh_access_token = AsyncMock()
+    mock_token_manager.has_streamer_token = MagicMock(return_value=False)
+    mock_token_manager.tokens = {"BOT_TOKEN": MagicMock(access_token="1234567890")}
+
+    # Patch asyncio.sleep to stop the loop immediately
+    async def fast_sleep(_):
+        manager._running = False
+
+    with (
+        patch("src.bot.manager.load_settings", return_value={"refresh_token_interval": 0}),
+        patch("src.bot.manager.asyncio.sleep", side_effect=fast_sleep),
+    ):
+        await manager._token_refresh_loop()
+
+    mock_token_manager.refresh_access_token.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_restart_bot_replaces_bot_task(mock_token_manager, mock_redis):
+    """Test that restart_bot cancels old bot task and starts a new one."""
+    manager = BotManager(token_manager=mock_token_manager, redis=mock_redis)
+    manager._running = True
+
+    old_bot_task = asyncio.create_task(asyncio.sleep(100))
+    old_bot = MagicMock(spec=TwitchBot)
+    manager.bot = old_bot
+    manager.bot_task = old_bot_task
+
+    mock_token_manager.get_access_token = AsyncMock(return_value="token")
+
+    new_bot = MagicMock(spec=TwitchBot)
+    new_bot.start = AsyncMock()
+    new_bot.is_connected = True
+
+    with (
+        patch("src.bot.manager.TwitchBot", return_value=new_bot),
+        patch("src.bot.manager.asyncio.sleep", new_callable=AsyncMock),
+    ):
+        await manager.restart_bot()
+
+    # Ensure old task is cancelled or finished, and new bot assigned
+    assert manager.bot is new_bot
+    assert old_bot_task.cancelled() or old_bot_task.done()
+    assert manager._websocket_error_count == 0
+    assert manager.bot_task is not None
+
+
+@pytest.mark.asyncio
+async def test_check_websocket_unhealthy(mock_token_manager, mock_redis):
+    """Test _check_websocket returns False when bot is disconnected."""
+    manager = BotManager(token_manager=mock_token_manager, redis=mock_redis)
+
+    bot = MagicMock(spec=TwitchBot)
+    bot.is_connected = False
+    manager.bot = bot
+
+    result = await manager._check_websocket()
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_healthcheck_when_manager_not_running(mock_token_manager, mock_redis):
+    """Test health endpoint returns 500 when manager is not running."""
+    manager = BotManager(token_manager=mock_token_manager, redis=mock_redis)
+    manager._running = False
+
+    request = MagicMock()
+    response = await manager._handle_health(request)
+
+    assert response.status == 500
+
+
+@pytest.mark.asyncio
+async def test_set_bot_wake(mock_token_manager, mock_redis):
+    """Test that set_bot_wake deletes sleep key and notifies channels."""
+    mock_redis.delete = AsyncMock()
+    manager = BotManager(token_manager=mock_token_manager, redis=mock_redis)
+
+    bot = MagicMock(spec=TwitchBot)
+    channel = AsyncMock()
+    channel.send = AsyncMock()
+    bot.connected_channels = [channel]
+    bot.config = {"schedule": {"timezone": "UTC"}}
+
+    manager.bot = bot
+    await manager.set_bot_wake()
+
+    mock_redis.delete.assert_awaited_once()
+    channel.send.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_watchdog_loop_triggers_restart(mock_token_manager, mock_redis):
+    """Test _watchdog_loop triggers restart_bot when bot health is bad."""
+    manager = BotManager(token_manager=mock_token_manager, redis=mock_redis)
+    manager._running = True
+
+    manager._check_bot_health = AsyncMock(return_value=False)
+    manager.restart_bot = AsyncMock()
+
+    # Simulate websocket error count reaching the threshold
+    manager._websocket_error_count = 2  # max_failures = 3
+
+    async def fast_sleep(_):
+        manager._running = False
+
+    with patch("src.bot.manager.asyncio.sleep", side_effect=fast_sleep):
+        await manager._watchdog_loop()
+
+    manager.restart_bot.assert_awaited_once()
