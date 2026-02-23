@@ -1,7 +1,8 @@
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from aiohttp import web
 from redis.asyncio import Redis
@@ -26,6 +27,12 @@ class BotManager:
       - Provide an internal HTTP healthcheck endpoint
       - Schedule bot activity (offline/online) according to config
     """
+
+    DEFAULT_SLEEP = 60
+    WATCHDOG_SLEEP = 60
+    SCHEDULE_LOOP_SLEEP = 60
+    TOKEN_REFRESH_RETRY_SLEEP = 300
+    STATUS_INTERVAL = 1800
 
     token_manager: TokenManager
     bot: TwitchBot | None
@@ -64,7 +71,6 @@ class BotManager:
         self.health_runner = None
         self.scheduled_task = None
         self._status_task = None
-        self.status_interval = 1800
 
     async def _periodic_status_report(self) -> None:
         """
@@ -82,7 +88,7 @@ class BotManager:
                 await self.report_status()
             except Exception as e:
                 logger.error(f"Failed to report status: {e}")
-            await asyncio.sleep(self.status_interval)
+            await asyncio.sleep(self.STATUS_INTERVAL)
 
     async def report_status(self) -> None:
         """
@@ -300,6 +306,11 @@ class BotManager:
                     logger.warning(f"Error during bot task cancellation: {e}")
 
             self.bot_task = None
+            if self.bot:
+                try:
+                    await self.bot.close()
+                except Exception as e:
+                    logger.warning(f"Error while closing bot: {e}")
             self.bot = None
             await asyncio.sleep(2)
 
@@ -397,66 +408,75 @@ class BotManager:
                 return
             except Exception as e:
                 logger.exception(f"Token refresh failed: {e}")
-                await asyncio.sleep(300)
+                await asyncio.sleep(self.TOKEN_REFRESH_RETRY_SLEEP)
 
     async def _watchdog_loop(self) -> None:
         """
-        Monitor Twitch WebSocket health and restart the bot on repeated failures.
+        Continuously monitor bot health and coordinate recovery strategy.
 
-        Checks the bot's connection and EventSub health at intervals based on the
-        current hour. Increments a websocket error counter when the bot is
-        unhealthy, attempts automatic recovery, and restarts the bot if
-        consecutive failures exceed the threshold.
+        This loop periodically checks overall bot health:
+          - WebSocket liveness (with ping/pong validation),
+          - IRC channel connectivity,
+          - EventSub socket state.
 
-        Logs all relevant events and errors, and handles exceptions gracefully.
+        Recovery strategy:
 
-        Returns:
-            None
+          1. On the first detected failure:
+             - Allow TwitchIO's internal re-connect logic to attempt recovery.
+             - Wait 60 seconds before performing another health check.
+             - This prevents conflict with the framework's own re-connect mechanism.
+
+          2. If a second consecutive failure occurs:
+             - Consider the connection unrecoverable.
+             - Trigger a full bot restart.
+
+        The failure counter resets immediately after a successful health check.
+
+        This design:
+          - Respects TwitchIO’s internal reconnect/backoff system.
+          - Prevents long-lived zombie WebSocket states.
+          - Avoids aggressive restart loops.
+          - Guarantees recovery within a bounded time window.
+
+        The loop runs while the BotManager is active.
         """
         while self._running:
             try:
                 hour = datetime.now().astimezone().hour
                 if 1 <= hour < 7:
-                    max_failures = 5
-                    check_interval = 300
-                    restart_delay = 30
+                    check_interval = 180
                 else:
-                    max_failures = 3
                     check_interval = 120
-                    restart_delay = 15
 
                 await asyncio.sleep(check_interval)
 
                 healthy = await self._check_bot_health()
-                if healthy and self.bot and hasattr(self.bot, "eventsub"):
-                    try:
-                        await self.bot.eventsub.ensure_alive()
-                    except Exception as e:
-                        logger.warning(f"Error ensuring EventSub alive: {e}")
-                if not healthy:
-                    self._websocket_error_count += 1
-                    logger.warning(f"WebSocket unhealthy ({self._websocket_error_count}/{max_failures})")
 
-                    if self._websocket_error_count == 1:
-                        logger.info("Giving bot time to self-recover...")
-                        await asyncio.sleep(60)
-                        healthy = await self._check_bot_health()
-                        if healthy:
-                            logger.info("Bot recovered automatically")
-                            self._websocket_error_count = 0
-                            continue
-
-                    if self._websocket_error_count >= max_failures:
-                        logger.error(f"Critical WebSocket errors → restarting bot in {restart_delay}s")
-                        await asyncio.sleep(restart_delay)
-                        await self.restart_bot()
-                        self._websocket_error_count = 0
-                else:
+                if healthy:
+                    if self._websocket_error_count > 0:
+                        logger.info("WebSocket recovered successfully")
                     self._websocket_error_count = 0
+                    continue
 
+                self._websocket_error_count += 1
+                logger.warning(f"WebSocket unhealthy " f"({self._websocket_error_count} consecutive failure(s))")
+
+                # ---- First failure: allow TwitchIO internal reconnect ----
+                if self._websocket_error_count == 1:
+                    logger.info("Allowing TwitchIO internal reconnect logic " "to recover (60s grace period)")
+                    await asyncio.sleep(self.WATCHDOG_SLEEP)
+                    continue
+
+                # ---- Second consecutive failure: force restart ----
+                logger.error("WebSocket did not recover — performing full restart")
+                await self.restart_bot()
+                self._websocket_error_count = 0
+
+            except asyncio.CancelledError:
+                return
             except Exception as e:
                 logger.exception(f"Error in watchdog loop: {e}")
-                await asyncio.sleep(60)
+                await asyncio.sleep(self.WATCHDOG_SLEEP)
 
     async def _check_bot_health(self) -> bool:
         """
@@ -554,149 +574,215 @@ class BotManager:
 
     async def _check_websocket(self) -> bool:
         """
-        Check the internal TwitchIO WebSocket state.
+        Validate TwitchIO WebSocket liveness.
 
-        Ensures that the bot is connected, the WebSocket connection is active,
-        and that there are connected channels. Returns False if any of these
-        checks fail.
+        Performs structural checks and a ping round-trip to ensure the
+        underlying aiohttp WebSocket is responsive.
 
         Returns:
-            bool: True if the WebSocket is active and channels are connected, False otherwise.
+            bool: True if the socket is alive and responsive, False otherwise.
         """
         if not self.bot:
             return False
 
         try:
             if not getattr(self.bot, "is_connected", False):
-                logger.debug("Bot is_connected = False")
                 return False
 
             connection = self._get_ws_connection(self.bot)
-            if connection and getattr(connection, "connected", False) is False:
-                logger.debug("Connection.connected = False")
+            if not connection:
                 return False
 
-            if hasattr(self.bot, "connected_channels") and not self.bot.connected_channels:
-                logger.debug("No connected channels — WS likely dead")
+            ws = getattr(connection, "_websocket", None)
+            if not ws:
+                return False
+
+            if ws.closed or ws.close_code is not None:
+                return False
+
+            try:
+                await asyncio.wait_for(ws.ping(), timeout=5.0)
+            except (TimeoutError, ConnectionError, RuntimeError, OSError):
+                return False
+
+            writer = getattr(ws, "_writer", None)
+            transport = getattr(writer, "transport", None)
+            if transport and transport.is_closing():
                 return False
 
             return True
 
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
             logger.warning(f"Error checking websocket: {e}")
             return False
+
+    @staticmethod
+    def _in_offline_window(now: time, start: time, end: time) -> bool:
+        """
+        Determine if the current time falls within the offline window.
+
+        Handles windows that cross midnight (e.g., 19:00–06:00).
+
+        Args:
+            now: Current time.
+            start: Start of the offline period.
+            end: End of the offline period.
+
+        Returns:
+            True if `now` is within the window, False otherwise.
+        """
+        if start < end:
+            return start <= now < end
+        return now >= start or now < end
+
+    async def _get_schedule_config(self) -> tuple[time, time, ZoneInfo] | None:
+        """
+        Extract schedule parameters from the bot's configuration.
+
+        Returns:
+            A tuple (offline_from, offline_to, timezone) if the schedule is enabled
+            and all required fields are present; otherwise None.
+        """
+        if not self.bot:
+            return None
+        schedule = self.bot.config.get("schedule", {})
+        if not schedule.get("enabled"):
+            return None
+        off_time = schedule.get("offline_from")
+        on_time = schedule.get("offline_to")
+        timezone = schedule.get("timezone")
+        if not off_time or not on_time or not timezone:
+            return None
+        return off_time, on_time, ZoneInfo(timezone)
+
+    async def _should_be_offline(self, now_dt: datetime, off_time: time, on_time: time) -> bool:
+        """
+        Determine whether the bot should be offline at the given moment.
+
+        The decision is based on the schedule and any admin override stored in Redis.
+        An override for today disables the schedule entirely for that day.
+
+        Args:
+            now_dt: Current date and time (timezone-aware).
+            off_time: Start of the offline window.
+            on_time: End of the offline window.
+
+        Returns:
+            True if the bot should be offline, False otherwise.
+        """
+        today_str = str(now_dt.date())
+        override_key = f"bot:override:{today_str}"
+        override = await self.redis.get(override_key)
+        if override:
+            return False
+        return self._in_offline_window(now_dt.time(), off_time, on_time)
+
+    async def _enter_offline_mode(self, bot: TwitchBot, now_dt: datetime, tz: ZoneInfo) -> None:
+        """
+        Transition the bot into offline mode.
+
+        Deactivates the bot, sends a notification message (if not already sent today),
+        and records in Redis that the message has been sent.
+
+        Args:
+            bot: The TwitchBot instance.
+            now_dt: Current date and time (timezone-aware).
+            tz: Timezone object for calculating end‑of‑day.
+        """
+        if not bot.active:
+            return
+        bot.active = False
+        logger.info(f"[{now_dt}] Entering scheduled offline window")
+
+        today_str, seconds_until_end_of_day = self._get_today_keys(tz)
+        message_key = f"bot:schedule_msg:{today_str}"
+        message_sent = await self.redis.get(message_key)
+        if not message_sent:
+            for channel in bot.connected_channels:
+                try:
+                    await channel.send("Bot is entering scheduled sleep mode. Use !ботговори to wake it (admin only).")
+                except Exception as e:
+                    logger.error(f"Failed to send sleep message: {e}")
+                    self._websocket_error_count += 1
+
+            await self.redis.set(message_key, "1", ex=seconds_until_end_of_day)
+
+    async def _exit_offline_mode(self, bot: TwitchBot, now_dt: datetime) -> None:
+        """
+        Transition the bot into online mode.
+
+        Activates the bot, ensures it is running (restarting if necessary),
+        sends a wake‑up notification, and removes the Redis marker for today's message.
+
+        Args:
+            bot: The TwitchBot instance.
+            now_dt: Current date and time (timezone-aware).
+        """
+        if bot.active:
+            return
+
+        bot.active = True
+        logger.info(f"[{now_dt}] Scheduled wake-up triggered")
+
+        if self.bot_task is None or self.bot_task.done() or not getattr(bot, "is_connected", False):
+            logger.warning("Bot not running after sleep, restarting...")
+            await self.restart_bot()
+
+            if self.bot is None or not getattr(self.bot, "is_connected", False):
+                logger.error("Bot failed to restart or is not connected")
+                return
+            bot = self.bot
+
+        for channel in bot.connected_channels:
+            try:
+                await channel.send("Bot is now active.")
+            except Exception as e:
+                logger.error(f"Failed to send wake-up message: {e}")
+                self._websocket_error_count += 1
+
+        today_str = str(now_dt.date())
+        message_key = f"bot:schedule_msg:{today_str}"
+        await self.redis.delete(message_key)
 
     async def _scheduled_activity_loop(self) -> None:
         """
         Control bot activity based on schedule and admin override.
 
-        This loop checks the bot's current time and Redis-backed per-day override
-        state. It manages entering and exiting offline mode based on the schedule.
-
-        Features:
-            - Schedule determines when the bot should be offline.
-            - Admin override (!ботговори) disables schedule for today only.
-            - Override automatically expires at midnight (date-based key).
-            - Redis is used as the single source of truth for per-day override.
-            - Restart-safe and fully deterministic.
-
-        The loop runs continuously while the manager is active.
+        This loop runs continuously while the manager is active.
+        It checks the schedule at regular intervals (every 60 seconds)
+        and puts the bot to sleep or wakes it up accordingly.
 
         Returns:
             None
         """
-        from datetime import time as dtime
-        from zoneinfo import ZoneInfo
-
-        def in_offline_window(now: dtime, start: dtime, end: dtime) -> bool:
-            """
-            Determine if the current time is within the offline window.
-
-            This function correctly handles offline windows that span midnight
-            (e.g., 19:00–06:00).
-
-            Args:
-                now (dtime): Current time.
-                start (dtime): Start of the offline period.
-                end (dtime): End of the offline period.
-
-            Returns:
-                bool: True if `now` falls within the offline window, False otherwise.
-            """
-            if start < end:
-                return start <= now < end
-            return now >= start or now < end
-
         while self._running:
             try:
                 if not self.bot:
                     await asyncio.sleep(5)
                     continue
 
-                bot = self.bot
-                schedule = bot.config.get("schedule", {})
-                if not schedule.get("enabled"):
-                    await asyncio.sleep(60)
+                config = await self._get_schedule_config()
+                if config is None:
+                    await asyncio.sleep(self.SCHEDULE_LOOP_SLEEP)
                     continue
 
-                off_time = schedule.get("offline_from")
-                on_time = schedule.get("offline_to")
-                timezone = schedule.get("timezone")
-                if not off_time or not on_time or not timezone:
-                    await asyncio.sleep(60)
-                    continue
-
-                tz = ZoneInfo(timezone)
+                off_time, on_time, tz = config
                 now_dt = datetime.now(tz)
-                now_time = now_dt.time()
-                today_str = str(now_dt.date())
 
-                override_key = f"bot:override:{today_str}"
-                message_key = f"bot:schedule_msg:{today_str}"
+                should_be_offline = await self._should_be_offline(now_dt, off_time, on_time)
 
-                today_override = await self.redis.get(override_key)
-                message_sent = await self.redis.get(message_key)
-
-                should_be_offline = in_offline_window(now_time, off_time, on_time) and not today_override
-
-                # --- ENTER OFFLINE MODE ---
                 if should_be_offline:
-                    if bot.active:
-                        bot.active = False
-                        logger.info(f"[{now_dt}] Entering scheduled offline window " f"({off_time}-{on_time})")
-
-                        if not message_sent:
-                            for channel in bot.connected_channels:
-                                await channel.send(
-                                    "Bot is entering scheduled sleep mode. " "Use !ботговори to wake it (admin only)."
-                                )
-                            tomorrow = datetime.combine(
-                                now_dt.date() + timedelta(days=1), datetime.min.time(), tzinfo=tz
-                            )
-                            seconds_until_end_of_day = int((tomorrow - now_dt).total_seconds())
-                            await self.redis.set(message_key, "1", ex=seconds_until_end_of_day)
-
-                # --- EXIT OFFLINE MODE ---
+                    await self._enter_offline_mode(self.bot, now_dt, tz)
                 else:
-                    if not bot.active:
-                        bot.active = True
-                        logger.info(f"[{now_dt}] Scheduled wake-up triggered")
+                    await self._exit_offline_mode(self.bot, now_dt)
 
-                        if self.bot_task is None or self.bot_task.done() or not getattr(bot, "is_connected", False):
-                            logger.warning("Bot not running after sleep, restarting...")
-                            await self.restart_bot()
-                            bot = self.bot
-
-                        for channel in bot.connected_channels:
-                            await channel.send("Bot is now active.")
-
-                        await self.redis.delete(message_key)
-
-                await asyncio.sleep(60)
+                await asyncio.sleep(self.SCHEDULE_LOOP_SLEEP)
 
             except Exception as e:
                 logger.exception(f"Scheduled activity loop error: {e}")
-                await asyncio.sleep(60)
+                await asyncio.sleep(self.SCHEDULE_LOOP_SLEEP)
 
     async def set_bot_sleep(self) -> None:
         """
@@ -711,9 +797,6 @@ class BotManager:
         if not self.bot:
             return
 
-        from datetime import datetime
-        from zoneinfo import ZoneInfo
-
         schedule = self.bot.config.get("schedule", {})
         timezone = schedule.get("timezone")
         if not timezone:
@@ -721,12 +804,8 @@ class BotManager:
             return
 
         tz = ZoneInfo(timezone)
-        now = datetime.now(tz)
-        today_str = str(now.date())
+        today_str, seconds_until_end_of_day = self._get_today_keys(tz)
         override_key = f"bot:override:{today_str}"
-
-        tomorrow = datetime.combine(now.date() + timedelta(days=1), datetime.min.time(), tzinfo=tz)
-        seconds_until_end_of_day = int((tomorrow - now).total_seconds())
 
         await self.redis.set(override_key, "1", ex=seconds_until_end_of_day)
         self.bot.active = False
@@ -749,9 +828,6 @@ class BotManager:
         if not self.bot:
             return
 
-        from datetime import datetime
-        from zoneinfo import ZoneInfo
-
         schedule = self.bot.config.get("schedule", {})
         timezone = schedule.get("timezone")
         if not timezone:
@@ -759,7 +835,7 @@ class BotManager:
             return
 
         tz = ZoneInfo(timezone)
-        today_str = str(datetime.now(tz).date())
+        today_str, _ = self._get_today_keys(tz)
         override_key = f"bot:override:{today_str}"
         await self.redis.delete(override_key)
 
@@ -768,3 +844,21 @@ class BotManager:
             await channel.send("deshovka Бот снова активен!")
 
         logger.info(f"Bot activated (override cleared) for {today_str}")
+
+    @staticmethod
+    def _get_today_keys(tz: ZoneInfo) -> tuple[str, int]:
+        """
+        Get Redis key for today and seconds until the end of the day.
+
+        Args:
+            tz (ZoneInfo): Timezone object for calculating the end of day.
+
+        Returns:
+            tuple[str, int]: Tuple containing:
+                - Redis key for today's date as a string.
+        """
+        now = datetime.now(tz)
+        today_str = str(now.date())
+        tomorrow = datetime.combine(now.date() + timedelta(days=1), datetime.min.time(), tzinfo=tz)
+        seconds_until_end_of_day = int((tomorrow - now).total_seconds())
+        return today_str, seconds_until_end_of_day
