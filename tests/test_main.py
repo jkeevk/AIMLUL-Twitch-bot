@@ -1,14 +1,16 @@
-from unittest.mock import patch, AsyncMock
+from unittest.mock import AsyncMock, patch
+
 import pytest
+
 import src.main as main_module
+
 
 @pytest.mark.asyncio
 async def test_main_starts_and_stops_bot():
-    """
-    Test that the main() function properly initializes the TokenManager, Redis,
-    and BotManager, starts the bot, and then stops it.
+    """Check normal startup and shutdown of main().
 
-    This ensures that the normal startup and shutdown sequence works correctly.
+    Ensures that TokenManager, Redis, and BotManager are initialized,
+    the bot starts, and then stops correctly.
     """
     # Create AsyncMock instances for dependencies
     mock_token_manager = AsyncMock()
@@ -16,10 +18,12 @@ async def test_main_starts_and_stops_bot():
     mock_manager = AsyncMock()
 
     # Patch all dependencies in main_module
-    with patch("src.main.TokenManager", return_value=mock_token_manager) as token_patch, \
-         patch("src.main.create_redis", return_value=mock_redis) as redis_patch, \
-         patch("src.main.BotManager", return_value=mock_manager) as manager_patch, \
-         patch("src.main.logger") as mock_logger:
+    with (
+        patch("src.main.TokenManager", return_value=mock_token_manager) as token_patch,
+        patch("src.main.create_redis", return_value=mock_redis) as redis_patch,
+        patch("src.main.BotManager", return_value=mock_manager) as manager_patch,
+        patch("src.main.logger") as mock_logger,
+    ):
 
         # Run main() asynchronously
         await main_module.main()
@@ -32,23 +36,25 @@ async def test_main_starts_and_stops_bot():
         mock_manager.stop.assert_awaited_once()
         mock_logger.info.assert_any_call("Starting bot...")
 
+
 @pytest.mark.asyncio
 async def test_main_logs_exception_and_stops_bot_on_error():
-    """
-    Test that if BotManager.start() raises an exception, main() catches it,
-    logs the exception, and still calls BotManager.stop() to clean up.
+    """Ensure main() handles BotManager.start() exceptions gracefully.
 
-    This ensures that the bot shuts down gracefully on startup errors.
+    If BotManager.start() raises an exception, main() should catch it,
+    log the error, and still call BotManager.stop() to clean up.
     """
     mock_manager = AsyncMock()
     # Simulate an error when starting the bot
     mock_manager.start.side_effect = Exception("fail")
 
     # Patch all dependencies in main_module
-    with patch("src.main.TokenManager", return_value=AsyncMock()), \
-         patch("src.main.create_redis", return_value=AsyncMock()), \
-         patch("src.main.BotManager", return_value=mock_manager), \
-         patch("src.main.logger") as mock_logger:
+    with (
+        patch("src.main.TokenManager", return_value=AsyncMock()),
+        patch("src.main.create_redis", return_value=AsyncMock()),
+        patch("src.main.BotManager", return_value=mock_manager),
+        patch("src.main.logger") as mock_logger,
+    ):
 
         # Run main() asynchronously
         await main_module.main()

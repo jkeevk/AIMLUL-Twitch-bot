@@ -1,5 +1,6 @@
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from src.api.twitch_api import TwitchAPI
 
@@ -9,9 +10,7 @@ async def test_bot_token_and_headers():
     """Test that bot_token and get_headers return correct values."""
     mock_bot = MagicMock()
     # Provide fake token and client_id
-    mock_bot.token_manager.tokens = {
-        "BOT_TOKEN": MagicMock(access_token="12345TOKEN", client_id="CLIENTID")
-    }
+    mock_bot.token_manager.tokens = {"BOT_TOKEN": MagicMock(access_token="12345TOKEN", client_id="CLIENTID")}
     api = TwitchAPI(mock_bot)
 
     # Check token retrieval
@@ -58,8 +57,10 @@ async def test_request_with_token_refresh_refreshes_on_401():
     response_mock.__aenter__.return_value.json = AsyncMock(return_value={})
 
     # Patch session request and refresh_headers
-    with patch.object(api.session, "request", return_value=response_mock), \
-            patch.object(api, "refresh_headers", AsyncMock()):
+    with (
+        patch.object(api.session, "request", return_value=response_mock),
+        patch.object(api, "refresh_headers", AsyncMock()),
+    ):
         status, data = await api._request_with_token_refresh("get", "http://test")
 
     # Token refresh should have been called

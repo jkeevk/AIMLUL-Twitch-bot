@@ -1,8 +1,9 @@
 import json
 from unittest.mock import AsyncMock
+
 import pytest
 
-from src.commands.managers.cache_manager import CacheManager, CHATTERS_KEY, USER_CD_KEY, CMD_CD_KEY
+from src.commands.managers.cache_manager import CHATTERS_KEY, CMD_CD_KEY, USER_CD_KEY, CacheManager
 from src.commands.models.chatters import ChatterData
 
 
@@ -10,6 +11,7 @@ from src.commands.models.chatters import ChatterData
 def redis_mock():
     """
     Fixture that provides a mocked Redis client with async methods.
+
     All Redis interactions in CacheManager will use this mock.
     """
     return AsyncMock()
@@ -17,9 +19,7 @@ def redis_mock():
 
 @pytest.fixture
 def cache_manager(redis_mock):
-    """
-    Fixture that returns a CacheManager instance using the mocked Redis client.
-    """
+    """Fixture that returns a CacheManager instance using the mocked Redis client."""
     return CacheManager(redis=redis_mock)
 
 
@@ -186,7 +186,9 @@ async def test_normalize_chatter_dict_and_obj(cache_manager):
     assert chatter.id == "4"
 
     # Object input
-    class Obj: pass
+    class Obj:
+        pass
+
     obj = Obj()
     obj.id = "5"
     obj.name = "objuser"
