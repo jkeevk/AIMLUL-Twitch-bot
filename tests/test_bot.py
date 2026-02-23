@@ -334,12 +334,20 @@ async def test_check_websocket_success(mock_token_manager, mock_redis):
 
     bot = MagicMock(spec=TwitchBot)
     bot.is_connected = True
-
-    # Mock internal connection object
-    connection = MagicMock()
-    connection.connected = True
-    bot._connection = connection
     bot.connected_channels = [MagicMock()]
+
+    # Mock connection и websocket
+    ws_mock = AsyncMock()
+    ws_mock.closed = False
+    ws_mock.close_code = None
+    ws_mock.ping = AsyncMock(return_value=AsyncMock())
+    ws_mock._writer = MagicMock()
+    ws_mock._writer.transport = MagicMock()
+    ws_mock._writer.transport.is_closing = MagicMock(return_value=False)
+
+    connection = MagicMock()
+    connection._websocket = ws_mock
+    bot._connection = connection
 
     manager.bot = bot
 
@@ -401,16 +409,61 @@ async def test_restart_bot_replaces_bot_task(mock_token_manager, mock_redis):
 
 
 @pytest.mark.asyncio
-async def test_check_websocket_unhealthy(mock_token_manager, mock_redis):
-    """Test _check_websocket returns False when bot is disconnected."""
+async def test_check_websocket_various_cases(mock_token_manager, mock_redis):
+    """Test _check_websocket under multiple healthy/unhealthy scenarios."""
     manager = BotManager(token_manager=mock_token_manager, redis=mock_redis)
 
+    # --- Case 1: bot is None ---
+    manager.bot = None
+    assert await manager._check_websocket() is False
+
+    # --- Case 2: bot.is_connected = False ---
     bot = MagicMock(spec=TwitchBot)
     bot.is_connected = False
     manager.bot = bot
+    assert await manager._check_websocket() is False
 
+    # --- Case 3: no _connection ---
+    bot.is_connected = True
+    bot._connection = None
+    assert await manager._check_websocket() is False
+
+    # --- Case 4: no _websocket ---
+    bot._connection = MagicMock(_websocket=None)
+    assert await manager._check_websocket() is False
+
+    # --- Case 5: websocket.closed = True ---
+    ws_mock = AsyncMock()
+    ws_mock.closed = True
+    bot._connection = MagicMock(_websocket=ws_mock)
+    assert await manager._check_websocket() is False
+
+    # --- Case 6: websocket.close_code is not None ---
+    ws_mock.closed = False
+    ws_mock.close_code = 1006
+    bot._connection = MagicMock(_websocket=ws_mock)
+    assert await manager._check_websocket() is False
+
+    # --- Case 7: websocket.ping() raises TimeoutError ---
+    ws_mock.close_code = None
+    ws_mock.ping = AsyncMock(side_effect=asyncio.TimeoutError)
+    bot._connection = MagicMock(_websocket=ws_mock)
+    assert await manager._check_websocket() is False
+
+    # --- Case 8: transport.is_closing() = True ---
+    ws_mock.ping = AsyncMock(return_value=AsyncMock())
+    transport_mock = MagicMock()
+    transport_mock.transport.is_closing = MagicMock(return_value=True)
+    ws_mock._writer = transport_mock
+    bot._connection = MagicMock(_websocket=ws_mock)
+    assert await manager._check_websocket() is False
+
+    # --- Case 9: healthy websocket ---
+    is_closing_mock = MagicMock(return_value=False)
+    transport_mock.transport.is_closing = is_closing_mock
+    bot._connection = MagicMock(_websocket=ws_mock)
     result = await manager._check_websocket()
-    assert result is False
+    assert result is True
 
 
 @pytest.mark.asyncio
