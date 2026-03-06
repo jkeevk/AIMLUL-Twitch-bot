@@ -517,7 +517,9 @@ async def test_event_subscription_with_duplicate_calls():
     mock_client = AsyncMock()
     subscribe_mock = AsyncMock()
     mock_client.subscribe_channel_points_redeemed = subscribe_mock
-
+    mock_socket = MagicMock()
+    mock_socket.is_connected = True
+    mock_client._sockets = [mock_socket]
     manager = EventSubManager(mock_bot)
 
     with patch("twitchio.ext.eventsub.EventSubWSClient", return_value=mock_client):
@@ -531,6 +533,7 @@ async def test_event_subscription_with_duplicate_calls():
 
         # Reset and call ensure_alive
         manager.subscribed = False
+        mock_client._sockets = []
         await manager.ensure_alive()
         assert subscribe_mock.call_count == 2
 
