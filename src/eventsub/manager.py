@@ -69,22 +69,26 @@ class EventSubManager:
         WebSocket sockets are present and connected. If not, it performs a full
         cleanup and recreates the subscription.
         """
-        if not self.subscribed or not self.client:
-            logger.warning("EventSub is not subscribed; attempting to subscribe.")
+        if not self.client:
+            logger.warning("EventSub client missing; recreating.")
             await self._subscribe_once()
             return
 
         sockets = getattr(self.client, "_sockets", [])
         if not sockets:
-            logger.warning("No active EventSub sockets detected; recreating subscription.")
+            logger.warning("EventSub: no sockets found → recreate")
             await self._cleanup()
             await self._subscribe_once()
             return
 
-        if not any(getattr(socket, "is_connected", False) for socket in sockets):
-            logger.warning("All EventSub sockets are disconnected; recreating subscription.")
+        active = [s for s in sockets if getattr(s, "is_connected", False)]
+        if not active:
+            logger.warning("EventSub: all sockets disconnected → recreate")
             await self._cleanup()
             await self._subscribe_once()
+            return
+
+        logger.debug("EventSub is healthy (%d active sockets)", len(active))
 
     async def close(self) -> None:
         """
@@ -100,13 +104,16 @@ class EventSubManager:
         """
         Internal method to create a single EventSub subscription.
 
-        Uses a lock to prevent concurrent subscription attempts. If a valid
-        subscription already exists, this method returns early.
+        Uses a lock to prevent concurrent subscription attempts. If a healthy
+        subscription already exists (client with active sockets), returns early.
         """
         async with self._reconnect_lock:
-            if self.subscribed and self.client:
-                logger.debug("EventSub is already subscribed.")
-                return
+            if self.client:
+                sockets = getattr(self.client, "_sockets", [])
+                if sockets and any(getattr(s, "is_connected", False) for s in sockets):
+                    logger.debug("EventSub already healthy; skipping subscription.")
+                    return
+                await self._cleanup()
 
             token = await self.bot.token_manager.get_streamer_token()
             if not token or not self.broadcaster_id:
@@ -139,11 +146,16 @@ class EventSubManager:
         """
         Internal method to reset the manager's state.
 
-        Clears references to the current client and subscription status.
-        The brief sleep allows any pending asynchronous operations to settle
-        before a potential re-subscription.
+        Closes the existing client if present, clears references to the current
+        client and subscription status, and waits briefly for pending operations
+        to settle before a potential re-subscription.
         """
+        if self.client:
+            try:
+                await self.client.close()
+            except Exception as e:
+                logger.debug(f"Error closing EventSub client: {e}")
         self.client = None
         self.subscribed = False
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(1)
         logger.debug("EventSub internal state has been cleared.")

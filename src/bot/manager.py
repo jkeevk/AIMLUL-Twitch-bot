@@ -280,9 +280,9 @@ class BotManager:
         """
         Safely restart the bot.
 
-        Cancels the current bot task if running, re-initializes the TwitchBot instance,
-        and starts it again. Acquires a lock to prevent concurrent restarts and
-        resets the WebSocket error count.
+        Closes EventSub, cancels the current bot task if running, closes the bot,
+        re-initializes the TwitchBot instance, and starts it again. Acquires a lock
+        to prevent concurrent restarts and resets the WebSocket error count.
 
         Ensures the bot is either restarted and connected, or logs warnings if it fails
         to reconnect.
@@ -295,6 +295,12 @@ class BotManager:
                 return
 
             logger.warning("Restarting bot...")
+
+            if self.bot and hasattr(self.bot, "eventsub") and self.bot.eventsub:
+                try:
+                    await self.bot.eventsub.close()
+                except Exception as e:
+                    logger.warning(f"Error closing EventSub during restart: {e}")
 
             if self.bot_task and not self.bot_task.done():
                 self.bot_task.cancel()
@@ -484,8 +490,8 @@ class BotManager:
 
         Verifies that the bot is connected, that the WebSocket is active,
         that all expected channels are joined, and that EventSub has at least
-        one active socket. Logs issues and returns False if any critical
-        component is unhealthy.
+        one active socket. If EventSub is unhealthy, attempts recovery via
+        ensure_alive() and returns False to trigger watchdog escalation.
 
         Returns:
             bool: True if the bot and all critical connections are healthy, False otherwise.
@@ -523,7 +529,12 @@ class BotManager:
             if hasattr(self.bot, "eventsub") and self.bot.eventsub:
                 eventsub_ok = await self._check_eventsub()
                 if not eventsub_ok:
-                    logger.warning("EventSub health check failed")
+                    logger.warning("EventSub health check failed – attempting recovery")
+                    try:
+                        await self.bot.eventsub.ensure_alive()
+                    except Exception as e:
+                        logger.error(f"Error during EventSub recovery: {e}")
+                    return False
 
             return True
 
