@@ -2,7 +2,8 @@ import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from sqlalchemy import desc, select, text
+from sqlalchemy import desc, func, select, text, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -90,28 +91,32 @@ class Database:
             Returns (0, 0) if a database error occurs.
         """
         try:
-            async with self.session_scope() as session:
-                result = await session.execute(select(PlayerStats).where(PlayerStats.twitch_id == twitch_id))
-                player = result.scalars().first()
+            wins_inc = 1 if win else 0
+            losses_inc = 0 if win else 1
 
-                if player:
-                    if win:
-                        player.wins += 1
-                    else:
-                        player.losses += 1
-                    logger.info(f"Updated stats for {username}: {'win' if win else 'loss'}")
-                else:
-                    player = PlayerStats(
+            async with self.session_scope() as session:
+                stmt = (
+                    pg_insert(PlayerStats)
+                    .values(
                         twitch_id=twitch_id,
                         username=username,
-                        wins=1 if win else 0,
-                        losses=0 if win else 1,
+                        wins=wins_inc,
+                        losses=losses_inc,
+                        tickets=0,
                     )
-                    session.add(player)
-                    logger.info(f"Created new record for {username}")
-
-                await session.flush()
-                return player.wins, player.losses
+                    .on_conflict_do_update(
+                        index_elements=[PlayerStats.twitch_id],
+                        set_={
+                            "username": username,
+                            "wins": PlayerStats.wins + wins_inc,
+                            "losses": PlayerStats.losses + losses_inc,
+                        },
+                    )
+                    .returning(PlayerStats.wins, PlayerStats.losses)
+                )
+                row = (await session.execute(stmt)).one()
+                logger.info(f"Updated stats for {username}: {'win' if win else 'loss'}")
+                return int(row.wins), int(row.losses)
 
         except SQLAlchemyError as e:
             logger.error(f"Update stats error: {e}", exc_info=True)
@@ -178,17 +183,26 @@ class Database:
         """
         try:
             async with self.session_scope() as session:
-                result = await session.execute(select(PlayerStats).where(PlayerStats.twitch_id == twitch_id))
-                player = result.scalars().first()
-
-                if not player:
-                    player = PlayerStats(twitch_id=twitch_id, username=username, tickets=amount)
-                    session.add(player)
-                else:
-                    player.tickets += amount
-
-                await session.flush()
-                return player.tickets
+                stmt = (
+                    pg_insert(PlayerStats)
+                    .values(
+                        twitch_id=twitch_id,
+                        username=username,
+                        wins=0,
+                        losses=0,
+                        tickets=amount,
+                    )
+                    .on_conflict_do_update(
+                        index_elements=[PlayerStats.twitch_id],
+                        set_={
+                            "username": username,
+                            "tickets": PlayerStats.tickets + amount,
+                        },
+                    )
+                    .returning(PlayerStats.tickets)
+                )
+                row = (await session.execute(stmt)).one()
+                return int(row.tickets)
 
         except SQLAlchemyError as e:
             logger.error(f"Add tickets error: {e}", exc_info=True)
@@ -207,18 +221,14 @@ class Database:
         """
         try:
             async with self.session_scope() as session:
-                result = await session.execute(select(PlayerStats).where(PlayerStats.twitch_id == twitch_id))
-                player = result.scalars().first()
-
-                if not player:
-                    return 0
-
-                current_tickets = player.tickets
-                new_tickets = max(current_tickets - amount, 0)
-                player.tickets = new_tickets
-
-                await session.flush()
-                return new_tickets
+                stmt = (
+                    update(PlayerStats)
+                    .where(PlayerStats.twitch_id == twitch_id)
+                    .values(tickets=func.greatest(PlayerStats.tickets - amount, 0))
+                    .returning(PlayerStats.tickets)
+                )
+                row = (await session.execute(stmt)).one_or_none()
+                return int(row.tickets) if row is not None else 0
 
         except SQLAlchemyError as e:
             logger.error(f"Remove tickets error: {e}", exc_info=True)
