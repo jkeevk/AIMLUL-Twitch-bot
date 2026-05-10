@@ -2,7 +2,7 @@ import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from sqlalchemy import desc, func, select, text, update
+from sqlalchemy import case, desc, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -224,7 +224,12 @@ class Database:
                 stmt = (
                     update(PlayerStats)
                     .where(PlayerStats.twitch_id == twitch_id)
-                    .values(tickets=func.greatest(PlayerStats.tickets - amount, 0))
+                    .values(
+                        tickets=case(
+                            (PlayerStats.tickets - amount < 0, 0),
+                            else_=PlayerStats.tickets - amount,
+                        )
+                    )
                     .returning(PlayerStats.tickets)
                 )
                 row = (await session.execute(stmt)).one_or_none()
