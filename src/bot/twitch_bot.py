@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import time
@@ -63,10 +64,29 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
 
         dsn: str | None = os.getenv("DATABASE_URL") or self.config["database"].get("dsn")
         self.db = Database(dsn) if dsn else None
+        self._db_reconnect_task: asyncio.Task[None] | None = None
         self.cache_manager = CacheManager(self.redis)
         self.command_handler = CommandHandler(self)
         self.eventsub = EventSubManager(self)
         self.triggers = build_triggers(self)
+
+    async def _retry_db_connect(self) -> None:
+        """Retry database connection in background until success."""
+        if not self.db:
+            return
+
+        delay = 5
+        while True:
+            try:
+                await self.db.connect()
+                logger.info("DB reconnect successful")
+                return
+            except asyncio.CancelledError:
+                return
+            except Exception as e:
+                logger.warning(f"DB reconnect failed, retry in {delay}s: {e}")
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 60)
 
     async def event_token_expired(self) -> str | None:
         """
@@ -98,7 +118,8 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
                 await self.db.connect()
             except Exception as e:
                 logger.error("DB connection failed", exc_info=e)
-                self.db = None
+                if self._db_reconnect_task is None or self._db_reconnect_task.done():
+                    self._db_reconnect_task = asyncio.create_task(self._retry_db_connect())
 
         await self.eventsub.setup()
 
@@ -247,6 +268,11 @@ class TwitchBot(commands.Bot):  # type: ignore[misc]
         if self.db:
             with suppress(Exception):
                 await self.db.close()
+
+        if self._db_reconnect_task and not self._db_reconnect_task.done():
+            self._db_reconnect_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._db_reconnect_task
 
         with suppress(Exception):
             await super().close()

@@ -151,6 +151,16 @@ class BotManager:
         except Exception as e:
             logger.warning(f"Redis error when counting keys: {e}")
 
+        db_connected: bool | str = "N/A"
+        try:
+            if hasattr(bot, "db") and bot.db:
+                db_connected = await bot.db.is_connected()
+            else:
+                db_connected = False
+        except Exception as e:
+            logger.warning(f"Database status check error: {e}")
+            db_connected = False
+
         logger.info(
             "Bot Status Report:\n"
             f"  Active: {active}\n"
@@ -160,7 +170,8 @@ class BotManager:
             f"  EventSub: subscribed={eventsub_status['subscribed']}, "
             f"sockets={eventsub_status['sockets']}, active={eventsub_status['active']}\n"
             f"  WebSocket IRC: connected={irc_connected}, joined_channels={joined_count}\n"
-            f"  Redis keys count: {redis_keys_count}"
+            f"  Redis keys count: {redis_keys_count}\n"
+            f"  Database connected: {db_connected}"
         )
 
     @staticmethod

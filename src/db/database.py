@@ -2,7 +2,7 @@ import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from sqlalchemy import desc, select
+from sqlalchemy import desc, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -42,6 +42,15 @@ class Database:
             logger.info("Database connection closed")
         except SQLAlchemyError as e:
             logger.error(f"Error closing database: {e}")
+
+    async def is_connected(self) -> bool:
+        """Check database availability with a lightweight query."""
+        try:
+            async with self.engine.connect() as conn:
+                await conn.execute(text("SELECT 1"))
+            return True
+        except SQLAlchemyError:
+            return False
 
     @asynccontextmanager
     async def session_scope(self) -> AsyncGenerator[AsyncSession]:
