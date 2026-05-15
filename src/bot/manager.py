@@ -141,15 +141,19 @@ class BotManager:
                 eventsub_status["sockets"] = len(es_client_sockets)
                 eventsub_status["active"] = sum(1 for s in es_client_sockets if getattr(s, "is_connected", False))
 
-        redis_keys_count: int | str = "N/A"
+        redis_info = "N/A"
         try:
             if hasattr(bot, "redis") and bot.redis:
+                await bot.redis.ping()
                 info = await bot.redis.info()
                 db0 = info.get("db0", {})
-                if isinstance(db0, dict):
-                    redis_keys_count = len(db0)
+                keys_count = len(db0) if isinstance(db0, dict) else "unknown"
+                redis_info = f"connected (keys: {keys_count})"
+            else:
+                redis_info = "not configured"
         except Exception as e:
-            logger.warning(f"Redis error when counting keys: {e}")
+            logger.warning(f"Redis error during status check: {e}")
+            redis_info = f"error: {e}"
 
         db_connected: bool | str = "N/A"
         try:
@@ -170,7 +174,7 @@ class BotManager:
             f"  EventSub: subscribed={eventsub_status['subscribed']}, "
             f"sockets={eventsub_status['sockets']}, active={eventsub_status['active']}\n"
             f"  WebSocket IRC: connected={irc_connected}, joined_channels={joined_count}\n"
-            f"  Redis keys count: {redis_keys_count}\n"
+            f"  Redis connection: {redis_info}\n"
             f"  Database connected: {db_connected}"
         )
 

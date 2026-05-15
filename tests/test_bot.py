@@ -255,7 +255,7 @@ async def test_report_status_logs_info(bot_manager: BotManager, caplog):
     # --- Assertions ---
     assert "Bot Status Report" in caplog.text
     assert "Active: True" in caplog.text
-    assert "Redis keys count: 1" in caplog.text
+    assert "(keys: 1)" in caplog.text
 
 
 @pytest.mark.asyncio
