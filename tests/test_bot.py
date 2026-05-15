@@ -246,6 +246,7 @@ async def test_report_status_logs_info(bot_manager: BotManager, caplog):
     bot_manager.bot = MagicMock(spec=TwitchBot)
     bot_manager.bot.active = True
     bot_manager.bot.redis = AsyncMock()
+    bot_manager.bot.redis.ping = AsyncMock()
     bot_manager.bot.redis.info = AsyncMock(return_value={"db0": {"key1": "val"}})
 
     caplog.set_level(logging.INFO)
@@ -255,7 +256,10 @@ async def test_report_status_logs_info(bot_manager: BotManager, caplog):
     # --- Assertions ---
     assert "Bot Status Report" in caplog.text
     assert "Active: True" in caplog.text
-    assert "(keys: 1)" in caplog.text
+    assert "Redis connected: True" in caplog.text
+    assert "Redis keys: 1" in caplog.text
+    assert "Database connected:" in caplog.text
+    assert "WebSocket IRC alive:" in caplog.text
 
 
 @pytest.mark.asyncio

@@ -99,7 +99,7 @@ class BotManager:
           - Twitch WebSocket and IRC connection status
           - Configured and joined channels
           - EventSub subscription and active socket counts
-          - Redis key count
+          - Redis connection status and key count
 
         Accesses protected members via helper methods to reduce mypy warnings.
 
@@ -130,8 +130,6 @@ class BotManager:
             if isinstance(initial_channels, list):
                 joined_count = len(initial_channels)
 
-        irc_connected: bool = connected
-
         eventsub_status: dict[str, int | bool] = {"subscribed": False, "sockets": 0, "active": 0}
         es_client_sockets = self._get_eventsub_sockets(bot)
         eventsub = getattr(bot, "eventsub", None)
@@ -141,26 +139,24 @@ class BotManager:
                 eventsub_status["sockets"] = len(es_client_sockets)
                 eventsub_status["active"] = sum(1 for s in es_client_sockets if getattr(s, "is_connected", False))
 
-        redis_info = "N/A"
+        redis_connected: bool = False
+        redis_keys: int = 0
         try:
             if hasattr(bot, "redis") and bot.redis:
                 await bot.redis.ping()
+                redis_connected = True
                 info = await bot.redis.info()
                 db0 = info.get("db0", {})
-                keys_count = len(db0) if isinstance(db0, dict) else "unknown"
-                redis_info = f"connected (keys: {keys_count})"
-            else:
-                redis_info = "not configured"
+                redis_keys = len(db0) if isinstance(db0, dict) else 0
         except Exception as e:
             logger.warning(f"Redis error during status check: {e}")
-            redis_info = f"error: {e}"
+            redis_connected = False
+            redis_keys = 0
 
-        db_connected: bool | str = "N/A"
+        db_connected: bool = False
         try:
             if hasattr(bot, "db") and bot.db:
                 db_connected = await bot.db.is_connected()
-            else:
-                db_connected = False
         except Exception as e:
             logger.warning(f"Database status check error: {e}")
             db_connected = False
@@ -168,13 +164,14 @@ class BotManager:
         logger.info(
             "Bot Status Report:\n"
             f"  Active: {active}\n"
-            f"  Connected (WebSocket IRC alive): {connected}\n"
+            f"  WebSocket IRC alive: {connected}\n"
             f"  Channels configured: {len(channels_configured)}\n"
             f"  Channels joined: {joined_count}\n"
-            f"  EventSub: subscribed={eventsub_status['subscribed']}, "
-            f"sockets={eventsub_status['sockets']}, active={eventsub_status['active']}\n"
-            f"  WebSocket IRC: connected={irc_connected}, joined_channels={joined_count}\n"
-            f"  Redis connection: {redis_info}\n"
+            f"  EventSub subscribed: {eventsub_status['subscribed']}\n"
+            f"  EventSub sockets: {eventsub_status['sockets']}\n"
+            f"  EventSub active sockets: {eventsub_status['active']}\n"
+            f"  Redis connected: {redis_connected}\n"
+            f"  Redis keys: {redis_keys}\n"
             f"  Database connected: {db_connected}"
         )
 
